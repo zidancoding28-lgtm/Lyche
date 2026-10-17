@@ -1,5 +1,5 @@
--- LycheHub | AirDrop Arena S5 | Dark Checkbox Menu
--- Drawing only. Delta-compatible. Smooth Mobile Drag.
+-- LycheHub | AirDrop Arena S5 | Drawer System & Anti-Crash
+-- Drawing only. Delta-compatible. Mobile optimized.
 
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -23,9 +23,8 @@ local CONFIG = {
     Distance     = true,
     Health       = true,
     WallCheck    = false,
-    TeamCheck    = false,
     MaxDistance  = 1000,
-    UpdateInterval = 0.05,
+    UpdateInterval = 0.08,
     JitterMax    = 0.02,
     BoxColor     = Color3.fromRGB(0, 255, 140),
     SkeletonColor= Color3.fromRGB(255, 255, 255),
@@ -34,7 +33,7 @@ local CONFIG = {
 }
 
 -- ═══════════════════════════════════════════════════════════
--- ESP HELPERS (Sama seperti versi fix streaming)
+-- ESP CORE (Fallback & Anti-Crash)
 -- ═══════════════════════════════════════════════════════════
 local function mk(c, p)
     local d = Drawing.new(c)
@@ -55,7 +54,6 @@ local function getESPBase(char)
     if hrp then return hrp, char:FindFirstChild("Head") end
     local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
     if torso then return torso, char:FindFirstChild("Head") end
-    local fallback
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") then return v, v end
     end
@@ -128,6 +126,7 @@ local function render(player)
     if not char then if renders[player] then hideSet(renders[player]) end; return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then if renders[player] then hideSet(renders[player]) end; return end
+    
     local basePart, headPart = getESPBase(char)
     if not basePart or not headPart then if renders[player] then hideSet(renders[player]) end; return end
 
@@ -188,27 +187,28 @@ RunService.Heartbeat:Connect(function(dt)
     accum = accum + dt
     if accum < CONFIG.UpdateInterval + math.random() * CONFIG.JitterMax then return end
     accum = 0
+    -- Pcall melindungi Delta dari crash jika ada properti Roblox yang berubah
     for _, p in ipairs(Players:GetPlayers()) do pcall(render, p) end
 end)
 
 Players.PlayerRemoving:Connect(function(p)
-    local s = renders[p]; if s then destroySet(s); renders[p] = nil end
+    local s = renders[p]; if s then pcall(destroySet, s); renders[p] = nil end
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- DARK THEME GUI (CHECKBOX & DRAG HEADER)
+-- DRAWER SYSTEM UI (Laci)
 -- ═══════════════════════════════════════════════════════════
 local C = {
-    Bg = Color3.fromRGB(15, 15, 18),         -- Hitam pekat
-    Header = Color3.fromRGB(25, 25, 30),     -- Hitam agak terang buat header
-    Border = Color3.fromRGB(60, 60, 70),     -- Garis tepi abu-abu
-    Text = Color3.fromRGB(240, 240, 240),    -- Putih
-    TextDim = Color3.fromRGB(150, 150, 160), -- Abu-abu text
-    CheckOn = Color3.fromRGB(0, 220, 120),   -- Hijau centang
-    CheckOff = Color3.fromRGB(40, 40, 45),   -- Kotak kosong
+    Bg = Color3.fromRGB(15, 15, 18),
+    Header = Color3.fromRGB(25, 25, 30),
+    Border = Color3.fromRGB(60, 60, 70),
+    Text = Color3.fromRGB(240, 240, 240),
+    TextDim = Color3.fromRGB(150, 150, 160),
+    CheckOn = Color3.fromRGB(0, 220, 120),
+    CheckOff = Color3.fromRGB(40, 40, 45),
 }
 
-local PANEL_W, HEADER_H, ROW_H, PAD = 220, 40, 36, 8
+local PANEL_W, ROW_H, PAD = 220, 36, 8
 local FEATURES = {
     {label="ESP Master", key="Enabled"}, {label="Box", key="Box"},
     {label="Skeleton", key="Skeleton"},  {label="Snapline", key="Snapline"},
@@ -217,7 +217,20 @@ local FEATURES = {
     {label="Wall Check", key="WallCheck"}
 }
 
-local gs = {visible=true, x=30, y=100, dragging=false, dragOff=Vector2.new(), rows={}}
+-- State Laci
+local ui = {
+    x = Camera.ViewportSize.X - 240, -- Posisi awal di kanan
+    y = 100,
+    tabX = Camera.ViewportSize.X - 40,
+    tabY = 100,
+    w = PANEL_W,
+    h = 50 + (#FEATURES * ROW_H) + PAD,
+    isOpen = false,
+    draggingPanel = false,
+    draggingTab = false,
+    dragOff = Vector2.new(),
+    anim = 0 -- 0 tertutup, 1 terbuka
+}
 
 local function gmk(c, p)
     local d = Drawing.new(c)
@@ -226,17 +239,23 @@ local function gmk(c, p)
     return d
 end
 
+-- Objek Drawings UI
 local G = {
+    -- Tab (Pegangan laci)
+    tabBg = gmk("Square",{Filled=true,Thickness=0,Color=C.Border}),
+    tabTx = gmk("Text",{Size=14,Center=true,Color=C.Text,Text="≡"}),
+    
+    -- Panel Laci
     bg = gmk("Square",{Filled=true,Thickness=0,Color=C.Bg,Transparency=0.1}),
     hd = gmk("Square",{Filled=true,Thickness=0,Color=C.Header}),
     bd = gmk("Square",{Filled=false,Thickness=1,Color=C.Border}),
-    title = gmk("Text",{Size=14,Center=false,Color=C.Text,Text="LYCHE HUB"}),
+    title = gmk("Text",{Size=14,Center=false,Color=C.Text,Text="LYCHE MENU"}),
     close = gmk("Text",{Size=16,Center=true,Color=C.TextDim,Text="X"}),
 }
 
+local rows = {}
 for i=1, #FEATURES do
-    gs.rows[i] = {
-        bg = gmk("Square",{Filled=true,Thickness=0,Color=C.Bg,Transparency=0.5}),
+    rows[i] = {
         lb = gmk("Text",{Size=13,Center=false,Color=C.Text}),
         box = gmk("Square",{Filled=true,Thickness=1,Color=C.CheckOff}),
         tick = gmk("Text",{Size=14,Center=true,Color=Color3.new(1,1,1),Text="✓"}),
@@ -244,89 +263,120 @@ for i=1, #FEATURES do
 end
 
 local function updateUI()
-    if not gs.visible then
-        for _, v in pairs(G) do v.Visible = false end
-        for _, r in pairs(gs.rows) do r.bg.Visible=false; r.lb.Visible=false; r.box.Visible=false; r.tick.Visible=false end
+    -- Animasi geser (slide) laci
+    local targetAnim = ui.isOpen and 1 or 0
+    ui.anim = ui.anim + (targetAnim - ui.anim) * 0.2
+    
+    -- Sinkronisasi posisi X panel mengikuti animasi dari Tab
+    local curX = ui.tabX - (ui.w + 10) * ui.anim
+    local curY = ui.tabY
+
+    -- Render Tab Pegangan
+    G.tabBg.Position = Vector2.new(ui.tabX, ui.tabY)
+    G.tabBg.Size = Vector2.new(40, 40)
+    G.tabTx.Position = Vector2.new(ui.tabX + 20, ui.tabY + 12)
+    G.tabBg.Visible = true; G.tabTx.Visible = true
+
+    -- Sembunyikan panel jika animasi hampir 0
+    if ui.anim < 0.05 then
+        for _, v in pairs(G) do if v ~= G.tabBg and v ~= G.tabTx then v.Visible = false end end
+        for _, r in pairs(rows) do r.lb.Visible=false; r.box.Visible=false; r.tick.Visible=false end
         return
     end
 
-    local totalH = HEADER_H + PAD + (#FEATURES * ROW_H) + PAD
-    G.bg.Position = Vector2.new(gs.x, gs.y); G.bg.Size = Vector2.new(PANEL_W, totalH)
-    G.hd.Position = Vector2.new(gs.x, gs.y); G.hd.Size = Vector2.new(PANEL_W, HEADER_H)
-    G.bd.Position = Vector2.new(gs.x, gs.y); G.bd.Size = Vector2.new(PANEL_W, totalH)
-    
-    G.title.Position = Vector2.new(gs.x + PAD + 4, gs.y + 12)
-    G.close.Position = Vector2.new(gs.x + PANEL_W - 20, gs.y + 12)
+    -- Render Panel
+    G.bg.Position = Vector2.new(curX, curY); G.bg.Size = Vector2.new(ui.w, ui.h)
+    G.hd.Position = Vector2.new(curX, curY); G.hd.Size = Vector2.new(ui.w, 40)
+    G.bd.Position = Vector2.new(curX, curY); G.bd.Size = Vector2.new(ui.w, ui.h)
+    G.title.Position = Vector2.new(curX + PAD + 4, curY + 12)
+    G.close.Position = Vector2.new(curX + ui.w - 20, curY + 12)
 
     for i, f in ipairs(FEATURES) do
-        local r = gs.rows[i]
-        local y = gs.y + HEADER_H + PAD + (i-1)*ROW_H
-        r.bg.Position = Vector2.new(gs.x, y); r.bg.Size = Vector2.new(PANEL_W, ROW_H)
-        r.lb.Position = Vector2.new(gs.x + PAD + 4, y + 9); r.lb.Text = f.label
+        local r = rows[i]
+        local y = curY + 40 + PAD + (i-1)*ROW_H
+        r.lb.Position = Vector2.new(curX + PAD + 4, y + 9); r.lb.Text = f.label
         
         local val = CONFIG[f.key]
-        local bx = gs.x + PANEL_W - 30
+        local bx = curX + ui.w - 30
         local by = y + (ROW_H - 16)/2
         
         r.box.Position = Vector2.new(bx, by); r.box.Size = Vector2.new(16, 16)
         r.box.Color = val and C.CheckOn or C.CheckOff
-        r.box.Transparency = 0
-        
         r.tick.Position = Vector2.new(bx + 8, by - 1)
         r.tick.Visible = val
         
-        r.bg.Visible = true; r.lb.Visible = true; r.box.Visible = true
+        r.lb.Visible = true; r.box.Visible = true
     end
+    
     G.bg.Visible = true; G.hd.Visible = true; G.bd.Visible = true; G.title.Visible = true; G.close.Visible = true
 end
 
 local function inRect(mx,my,x,y,w,h) return mx>=x and mx<=x+w and my>=y and my<=y+h end
 
+-- INPUT HANDLING (Bisa Drag Tab & Drag Panel)
 UIS.InputBegan:Connect(function(input)
     if input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
     local mx, my = input.Position.X, input.Position.Y
 
-    -- Tombol Close
-    if gs.visible and inRect(mx,my, gs.x + PANEL_W - 30, gs.y, 30, HEADER_H) then
-        gs.visible = false
-        updateUI()
+    -- 1. Cek Klik Tab (Buka/Tutup Laci)
+    if inRect(mx,my, ui.tabX, ui.tabY, 40, 40) then
+        ui.draggingTab = true
+        ui.dragOff = Vector2.new(mx - ui.tabX, my - ui.tabY)
+        -- Jika tidak di-drag (hanya tap), maka toggle laci
+        task.delay(0.15, function()
+            if ui.draggingTab then
+                ui.isOpen = not ui.isOpen
+                ui.draggingTab = false
+            end
+        end)
         return
     end
 
-    if not gs.visible then return end
+    if not ui.isOpen then return end
 
-    -- Area Drag (Header)
-    if inRect(mx,my, gs.x, gs.y, PANEL_W, HEADER_H) then
-        gs.dragging = true
-        gs.dragOff = Vector2.new(mx - gs.x, my - gs.y)
+    -- 2. Cek Drag Header Panel
+    local curX = ui.tabX - (ui.w + 10)
+    local curY = ui.tabY
+    if inRect(mx,my, curX, curY, ui.w, 40) then
+        ui.draggingPanel = true
+        ui.dragOff = Vector2.new(mx - curX, my - curY)
         return
     end
 
-    -- Area Klik Fitur (Seluruh baris)
+    -- 3. Cek Centang Fitur
     for i, f in ipairs(FEATURES) do
-        local y = gs.y + HEADER_H + PAD + (i-1)*ROW_H
-        if inRect(mx,my, gs.x, y, PANEL_W, ROW_H) then
+        local y = curY + 40 + PAD + (i-1)*ROW_H
+        if inRect(mx,my, curX, y, ui.w, ROW_H) then
             CONFIG[f.key] = not CONFIG[f.key]
-            updateUI()
             return
         end
     end
 end)
 
 UIS.InputChanged:Connect(function(input)
-    if not gs.dragging then return end
+    if not (ui.draggingTab or ui.draggingPanel) then return end
     if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement then
-        gs.x = input.Position.X - gs.dragOff.X
-        gs.y = input.Position.Y - gs.dragOff.Y
-        updateUI()
+        local mx, my = input.Position.X, input.Position.Y
+        
+        if ui.draggingTab then
+            ui.tabX = mx - ui.dragOff.X
+            ui.tabY = my - ui.dragOff.Y
+        elseif ui.draggingPanel then
+            local targetTabX = mx - ui.dragOff.X + (ui.w + 10)
+            ui.tabX = targetTabX
+            ui.tabY = my - ui.dragOff.Y
+        end
     end
 end)
 
 UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        gs.dragging = false
+        ui.draggingTab = false
+        ui.draggingPanel = false
     end
 end)
 
-updateUI()
-RunService.RenderStepped:Connect(updateUI)
+-- Rendering UI berjalan di RenderStepped agar animasi mulus
+RunService.RenderStepped:Connect(function()
+    pcall(updateUI)
+end)
