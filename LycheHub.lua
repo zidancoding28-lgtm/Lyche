@@ -1,4 +1,4 @@
--- LycheHub | AirDrop Arena S5 | Radial Mobile GUI
+-- LycheHub | AirDrop Arena S5 | Fixed Streaming, Drag Anchor, & Custom Rig
 -- Drawing only. Delta-compatible.
 
 local Players    = game:GetService("Players")
@@ -16,29 +16,25 @@ assert(Drawing, "executor tanpa Drawing API")
 local CONFIG = {
     Enabled      = true,
     Box          = true,
-    Skeleton     = false,
+    Skeleton     = true, -- Default nyala biar keliatan custom rig-nya
     Snapline     = true,
     HeadDot      = true,
     Name         = true,
     Distance     = true,
     Health       = true,
-    WallCheck    = true,
+    WallCheck    = false, -- Matiin dulu, game ini kadang banyak part transparan (daun/kaca)
     TeamCheck    = false,
-    MaxDistance  = 400,
-    UpdateInterval = 0.08,
-    JitterMax    = 0.03,
+    MaxDistance  = 1000,  -- Diperbesar biar nangkep semua map AirDrop
+    UpdateInterval = 0.05,
+    JitterMax    = 0.02,
     BoxColor     = Color3.fromRGB(0, 255, 140),
     SkeletonColor= Color3.fromRGB(255, 255, 255),
     SnaplineColor= Color3.fromRGB(0, 255, 140),
     HeadDotColor = Color3.fromRGB(255, 60, 60),
-    NameColor    = Color3.fromRGB(255, 255, 255),
-    DistColor    = Color3.fromRGB(200, 200, 200),
-    HealthFull   = Color3.fromRGB(0, 255, 0),
-    HealthLow    = Color3.fromRGB(255, 0, 0),
 }
 
 -- ═══════════════════════════════════════════════════════════
--- ESP HELPERS & SKELETON
+-- HELPERS & BONES
 -- ═══════════════════════════════════════════════════════════
 local function mk(c, p)
     local d = Drawing.new(c)
@@ -53,14 +49,22 @@ local function w2s(pos)
     return Vector2.new(sp.X, sp.Y)
 end
 
-local function isVisible(hrp, char)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LP.Character, char }
-    params.IgnoreWater = true
-    local origin = Camera.CFrame.Position
-    local hit = Workspace:Raycast(origin, hrp.Position - origin, params)
-    return hit == nil
+-- Fix Streaming/Char hilang: Cari titik terdekat dari posisi pemain
+local function getESPBase(char)
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then return hrp, char:FindFirstChild("Head") end
+    
+    -- Fallback buat custom rig / streaming delay
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    if torso then return torso, char:FindFirstChild("Head") end
+    
+    -- Fallback terakhir: ambil part apa aja yang ada
+    local fallback
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then return v, v end
+    end
+    return nil, nil
 end
 
 local SK_R15 = {
@@ -96,10 +100,10 @@ local renders = {}
 local function buildSet()
     return {
         box  = mk("Square", {Thickness=1, Filled=false, Color=CONFIG.BoxColor}),
-        name = mk("Text",   {Size=13, Center=true, Outline=true, Color=CONFIG.NameColor}),
-        dist = mk("Text",   {Size=11, Center=true, Outline=true, Color=CONFIG.DistColor}),
+        name = mk("Text",   {Size=13, Center=true, Outline=true, Color=Color3.new(1,1,1)}),
+        dist = mk("Text",   {Size=11, Center=true, Outline=true, Color=Color3.fromRGB(200,200,200)}),
         hpBg = mk("Square", {Thickness=1, Filled=true, Color=Color3.new(0,0,0), Transparency=0.4}),
-        hpFg = mk("Square", {Thickness=1, Filled=true, Color=CONFIG.HealthFull, Transparency=0.2}),
+        hpFg = mk("Square", {Thickness=1, Filled=true, Color=Color3.fromRGB(0,255,0), Transparency=0.2}),
         line = mk("Line",   {Thickness=1, Color=CONFIG.SnaplineColor, Transparency=0.5}),
         dot  = mk("Circle", {Thickness=1, Filled=true, Radius=3, Color=CONFIG.HeadDotColor}),
         bones= {},
@@ -131,34 +135,32 @@ local function render(player)
     if player == LP then return end
     local char = player.Character
     if not char then if renders[player] then hideSet(renders[player]) end; return end
-    local hrp  = char:FindFirstChild("HumanoidRootPart")
-    local hum  = char:FindFirstChildOfClass("Humanoid")
-    local head = char:FindFirstChild("Head")
-    if not hrp or not hum or hum.Health <= 0 or not head then
-        if renders[player] then hideSet(renders[player]) end; return
-    end
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then if renders[player] then hideSet(renders[player]) end; return end
+    
+    local basePart, headPart = getESPBase(char)
+    if not basePart or not headPart then if renders[player] then hideSet(renders[player]) end; return end
 
     local set = renders[player] or buildSet()
     renders[player] = set
 
-    if CONFIG.TeamCheck and player.Team and LP.Team and player.Team == LP.Team then hideSet(set); return end
-
-    local myChar = LP.Character
-    local myHrp  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myHrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if not myHrp then hideSet(set); return end
-    local dist = (hrp.Position - myHrp.Position).Magnitude
+    
+    local dist = (basePart.Position - myHrp.Position).Magnitude
     if dist > CONFIG.MaxDistance then hideSet(set); return end
-    if CONFIG.WallCheck and not isVisible(hrp, char) then hideSet(set); return end
 
-    local headS = w2s(head.Position)
-    local rootS = w2s(hrp.Position)
+    local headS = w2s(headPart.Position)
+    local rootS = w2s(basePart.Position)
     if not headS or not rootS then hideSet(set); return end
 
-    local h = (rootS.Y - headS.Y) * 2.2
-    if h < 8 then hideSet(set); return end
+    -- Kalkulasi Box (toleransi tinggi buat custom rig)
+    local h = math.abs(rootS.Y - headS.Y) * 2.5
+    if h < 10 then h = 40 end -- Min height kalau jarak terlalu deket
     local w = h * 0.5
     local bx = headS.X - w / 2
-    local by = headS.Y - h * 0.1
+    local by = headS.Y - (h * 0.15)
 
     set.box.Visible = CONFIG.Box
     if CONFIG.Box then
@@ -186,13 +188,12 @@ local function render(player)
         set.hpBg.Position = Vector2.new(bx - 6, by)
         set.hpFg.Size = Vector2.new(3, h * pct)
         set.hpFg.Position = Vector2.new(bx - 6, by + h * (1 - pct))
-        set.hpFg.Color = CONFIG.HealthLow:Lerp(CONFIG.HealthFull, pct)
+        set.hpFg.Color = Color3.fromRGB(255,0,0):Lerp(Color3.fromRGB(0,255,0), pct)
     end
 
     set.line.Visible = CONFIG.Snapline
     if CONFIG.Snapline then
-        local vp = Camera.ViewportSize
-        set.line.From = Vector2.new(vp.X / 2, vp.Y)
+        set.line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
         set.line.To = Vector2.new(headS.X, by + h)
     end
 
@@ -210,8 +211,6 @@ local function render(player)
                 l.Visible = true; l.From = sa; l.To = sb
             else l.Visible = false end
         end
-    else
-        for _, l in ipairs(set.bones) do l.Visible = false end
     end
 end
 
@@ -233,31 +232,21 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- RADIAL MOBILE GUI (NO DRAG, TOUCH FRIENDLY)
+-- GUI PANEL (DRAG ANCHOR)
 -- ═══════════════════════════════════════════════════════════
-local C = {
-    Bg=Color3.fromRGB(18,20,26), Border=Color3.fromRGB(0,220,180),
-    Text=Color3.fromRGB(230,235,245), Dim=Color3.fromRGB(150,158,175),
-    On=Color3.fromRGB(0,220,180), Off=Color3.fromRGB(70,76,92)
-}
+local C = { Bg=Color3.fromRGB(18,20,26), Header=Color3.fromRGB(28,32,42),
+    Border=Color3.fromRGB(0,220,180), Text=Color3.fromRGB(230,235,245),
+    Dim=Color3.fromRGB(150,158,175), On=Color3.fromRGB(0,220,180), Off=Color3.fromRGB(70,76,92) }
 
+local PANEL_W, ROW_H, PAD = 230, 38, 8
 local FEATURES = {
-    {label="ESP",        key="Enabled"},
-    {label="Box",        key="Box"},
-    {label="Line",       key="Snapline"},
-    {label="Head",       key="HeadDot"},
-    {label="Name",       key="Name"},
-    {label="Dist",       key="Distance"},
-    {label="HP",         key="Health"},
-    {label="Wall",       key="WallCheck"},
+    {label="ESP Master", key="Enabled"}, {label="Box", key="Box"},
+    {label="Skeleton", key="Skeleton"},  {label="Snapline", key="Snapline"},
+    {label="Head Dot", key="HeadDot"},   {label="Health Bar", key="Health"},
+    {label="Wall Check", key="WallCheck"}
 }
 
--- State
-local menuOpen = false
-local animProg = 0 -- 0 to 1 untuk animasi melengkung
-local cx, cy     = 0, 0
-local mainBtnR   = 30
-local itemBtnR   = 24
+local gs = {visible=true, x=20, y=60, dragging=false, dragOff=Vector2.new(), rows={}}
 
 local function gmk(c, p)
     local d = Drawing.new(c)
@@ -266,105 +255,104 @@ local function gmk(c, p)
     return d
 end
 
-local gui = {
-    mainCircle = gmk("Circle",{Filled=true,Thickness=0,Color=C.Bg,Transparency=0.1}),
-    mainBorder = gmk("Circle",{Filled=false,Thickness=2,Color=C.Border,Transparency=0.2}),
-    mainText   = gmk("Text",{Size=14,Center=true,Outline=true,Color=C.Text,Text="ESP"}),
-    items = {}
+-- UI Elements
+local G = {
+    bg = gmk("Square",{Filled=true,Thickness=0,Color=C.Bg,Transparency=0.1}),
+    hd = gmk("Square",{Filled=true,Thickness=0,Color=C.Header}),
+    bd = gmk("Square",{Filled=false,Thickness=1,Color=C.Border,Transparency=0.2}),
+    tt = gmk("Text",{Size=14,Center=false,Color=C.Text,Text="LYCHE ESP"}),
+    -- DRAG ANCHOR (Grip Handle)
+    anchorBg = gmk("Square",{Filled=true,Thickness=0,Color=C.Border}),
+    anchorTx = gmk("Text",{Size=14,Center=true,Color=Color3.new(1,1,1),Text="≡"}),
 }
 
-for i, f in ipairs(FEATURES) do
-    gui.items[i] = {
-        bg  = gmk("Circle",{Filled=true,Thickness=0,Color=C.Off,Transparency=0.2}),
-        txt = gmk("Text",{Size=12,Center=true,Outline=true,Color=C.Text,Text=f.label}),
-        f   = f
+for i=1, #FEATURES do
+    gs.rows[i] = {
+        bg = gmk("Square",{Filled=true,Thickness=0,Color=C.Off,Transparency=0.4}),
+        lb = gmk("Text",{Size=13,Center=false,Color=C.Text}),
+        -- Tombol switch gede
+        kn = gmk("Square",{Filled=true,Thickness=0,Color=C.Off}),
     }
 end
 
-local function updateGuiPositions()
-    local v = Camera.ViewportSize
-    cx = v.X - 50
-    cy = v.Y - 100
-
-    gui.mainCircle.Position = Vector2.new(cx, cy)
-    gui.mainCircle.Radius = mainBtnR
-    gui.mainBorder.Position = Vector2.new(cx, cy)
-    gui.mainBorder.Radius = mainBtnR
-    gui.mainText.Position = Vector2.new(cx, cy - 6)
-
-    local n = #FEATURES
-    local startAngle = math.rad(180) -- mulai dari kiri
-    local endAngle   = math.rad(270) -- sampai atas
-    local radiusDist = 80
-
-    for i, item in ipairs(gui.items) do
-        local angle = startAngle + (endAngle - startAngle) * ((i - 1) / math.max(1, n - 1))
-        local dist  = radiusDist * animProg
-        local ix = cx + math.cos(angle) * dist
-        local iy = cy + math.sin(angle) * dist
-
-        item.bg.Position = Vector2.new(ix, iy)
-        item.bg.Radius = itemBtnR
-        item.txt.Position = Vector2.new(ix, iy - 6)
-        
-        local val = CONFIG[item.f.key]
-        item.bg.Color = val and C.On or C.Off
-        item.bg.Transparency = animProg > 0.5 and 0.3 or 0 -- fade out pas nutup
-    end
-end
-
-local function applyGuiVisibility()
-    gui.mainCircle.Visible = true
-    gui.mainBorder.Visible = true
-    gui.mainText.Visible = true
-    gui.mainText.Text = menuOpen and "X" or "ESP"
-
-    for _, item in ipairs(gui.items) do
-        item.bg.Visible = animProg > 0.1
-        item.txt.Visible = animProg > 0.5
-    end
-end
-
--- Render loop buat animasi buka-tutup
-RunService.RenderStepped:Connect(function(dt)
-    if menuOpen and animProg < 1 then
-        animProg = math.min(1, animProg + dt * 8) -- animasi cepat 0.12 detik
-    elseif not menuOpen and animProg > 0 then
-        animProg = math.max(0, animProg - dt * 8)
-    end
-    updateGuiPositions()
-    applyGuiVisibility()
-end)
-
--- Hit Detection
-local function distSq(x1,y1,x2,y2)
-    local dx, dy = x1-x2, y1-y2
-    return dx*dx + dy*dy
-end
-
--- Input Tangkap Klik
-UIS.InputBegan:Connect(function(input)
-    if input.UserInputType ~= Enum.UserInputType.Touch
-       and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-    local mx, my = input.Position.X, input.Position.Y
-
-    -- 1. Cek Klik Tombol Utama
-    if distSq(mx, my, cx, cy) <= mainBtnR^2 then
-        menuOpen = not menuOpen
+local function updateUI()
+    if not gs.visible then
+        for _, v in pairs(G) do v.Visible = false end
+        for _, r in pairs(gs.rows) do r.bg.Visible=false; r.lb.Visible=false; r.kn.Visible=false end
         return
     end
 
-    -- 2. Cek Klik Tombol Melengkung (hanya jika menu terbuka penuh)
-    if menuOpen and animProg > 0.8 then
-        for i, item in ipairs(gui.items) do
-            if distSq(mx, my, item.bg.Position.X, item.bg.Position.Y) <= itemBtnR^2 then
-                local k = item.f.key
-                CONFIG[k] = not CONFIG[k]
-                break
-            end
+    local totalH = 40 + PAD + (#FEATURES * ROW_H) + PAD
+    G.bg.Position = Vector2.new(gs.x, gs.y); G.bg.Size = Vector2.new(PANEL_W, totalH)
+    G.hd.Position = Vector2.new(gs.x, gs.y); G.hd.Size = Vector2.new(PANEL_W, 40)
+    G.bd.Position = Vector2.new(gs.x, gs.y); G.bd.Size = Vector2.new(PANEL_W, totalH)
+    G.tt.Position = Vector2.new(gs.x + PAD + 4, gs.y + 12)
+    
+    -- Anchor di kanan atas
+    G.anchorBg.Position = Vector2.new(gs.x + PANEL_W - 40, gs.y + 10)
+    G.anchorBg.Size = Vector2.new(30, 20)
+    G.anchorTx.Position = Vector2.new(gs.x + PANEL_W - 25, gs.y + 11)
+
+    for i, f in ipairs(FEATURES) do
+        local r = gs.rows[i]
+        local y = gs.y + 40 + PAD + (i-1)*ROW_H
+        r.bg.Position = Vector2.new(gs.x + 8, y); r.bg.Size = Vector2.new(PANEL_W - 16, ROW_H - 6)
+        r.lb.Position = Vector2.new(gs.x + PAD + 6, y + 8); r.lb.Text = f.label
+        
+        local val = CONFIG[f.key]
+        local kw, kh = 36, 18
+        local kx = gs.x + PANEL_W - PAD - kw - 8
+        local ky = y + (ROW_H - 6 - kh) / 2
+        
+        r.kn.Position = Vector2.new(kx, ky); r.kn.Size = Vector2.new(kw, kh)
+        r.kn.Color = val and C.On or C.Off
+        
+        r.bg.Visible = true; r.lb.Visible = true; r.kn.Visible = true
+    end
+    G.bg.Visible = true; G.hd.Visible = true; G.bd.Visible = true
+    G.tt.Visible = true; G.anchorBg.Visible = true; G.anchorTx.Visible = true
+end
+
+local function pointIn(mx,my,x,y,w,h) return mx>=x and mx<=x+w and my>=y and my<=y+h end
+
+UIS.InputBegan:Connect(function(input)
+    if not gs.visible then return end
+    if input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    local mx, my = input.Position.X, input.Position.Y
+
+    -- Cek Klik Anchor (Grip)
+    if pointIn(mx,my, gs.x + PANEL_W - 40, gs.y + 10, 30, 20) then
+        gs.dragging = true
+        gs.dragOff = Vector2.new(mx - gs.x, my - gs.y)
+        return
+    end
+
+    -- Cek Klik Toggle Row
+    for i, f in ipairs(FEATURES) do
+        local y = gs.y + 40 + PAD + (i-1)*ROW_H
+        if pointIn(mx,my, gs.x + 8, y, PANEL_W - 16, ROW_H - 6) then
+            CONFIG[f.key] = not CONFIG[f.key]
+            updateUI()
+            return
         end
     end
 end)
 
--- Handle Resize (Misal HP diputar)
-Camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateGuiPositions)
+UIS.InputChanged:Connect(function(input)
+    if not gs.dragging then return end
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement then
+        gs.x = input.Position.X - gs.dragOff.X
+        gs.y = input.Position.Y - gs.dragOff.Y
+        updateUI()
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        gs.dragging = false
+    end
+end)
+
+-- Initial Render
+updateUI()
+RunService.RenderStepped:Connect(updateUI)
