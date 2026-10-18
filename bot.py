@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v46 (All-in-One)
+# bot.py | DanzzBot v47 (Full Combined)
 import os
 import io
 import requests
@@ -31,7 +31,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v46. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v47. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -121,27 +121,38 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cari_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/caripreset [kata_kunci]`")
+    
     keyword = " ".join(context.args)
     msg = await update.message.reply_text(f"🔍 Mencari preset: **{keyword}**...", parse_mode='Markdown')
+    
     try:
-        query = f"site:capcut.com template {keyword} OR site:alightmotion.com {keyword}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        query = f"capcut template {keyword}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
         r = requests.get(url, headers=headers, timeout=15)
+        
         soup = BeautifulSoup(r.text, 'html.parser')
-        results = soup.find_all('a', class_='result__url')
-        if not results: return await msg.edit_text("❌ Nggak nemu link preset.")
-        text = f"🎬 **Hasil Preset:**\n\n"
+        links = soup.find_all('a')
+        
+        text = f"🎬 **Hasil Pencarian Preset:**\n\n"
         count = 0
-        for res in results:
-            if count >= 5: break
-            link = res.get('href')
-            if link and link.startswith('http'):
-                text += f"🔗 {link}\n\n"
+        for link in links:
+            href = link.get('href')
+            if href and ('capcut.com' in href):
+                if href.startswith('/url?q='):
+                    href = href.split('&')[0].replace('/url?q=', '')
+                
+                if count >= 5: break
+                text += f"🔗 {href}\n\n"
                 count += 1
-        if count == 0: await msg.edit_text("❌ Link nggak valid.")
-        else: await msg.edit_text(text, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+                
+        if count == 0:
+            await msg.edit_text("❌ Nggak nemu link preset dari CapCut. Coba kata kunci lain.")
+        else:
+            await msg.edit_text(text, parse_mode='Markdown', disable_web_page_preview=True)
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ Gagal mencari: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR SCRAPER & TEMP MAIL
@@ -327,7 +338,7 @@ async def usn_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = set()
     while len(res) < 15:
         s = random.randint(1, 3)
-        if s == 1: res.add(f"real.{base}")
+        if s =1: res.add(f"real.{base}")
         elif s == 2: res.add(f"{base}{random.choice(['01','99','666','69'])}")
         else: res.add(f"{base}_id")
     await msg.edit_text("✨ **Username:**\n" + "\n".join([f"{i}. `{r}`" for i, r in enumerate(res, 1)]), parse_mode='Markdown')
@@ -456,7 +467,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v46 berjalan...")
+    print("[@Cancer666] Bot v47 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
