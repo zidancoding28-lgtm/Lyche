@@ -338,7 +338,7 @@ async def usn_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = set()
     while len(res) < 15:
         s = random.randint(1, 3)
-        if s =1: res.add(f"real.{base}")
+        if s = 1: res.add(f"real.{base}")
         elif s == 2: res.add(f"{base}{random.choice(['01','99','666','69'])}")
         else: res.add(f"{base}_id")
     await msg.edit_text("✨ **Username:**\n" + "\n".join([f"{i}. `{r}`" for i, r in enumerate(res, 1)]), parse_mode='Markdown')
