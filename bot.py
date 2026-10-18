@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v54 (Cancellable Tasks)
+# bot.py | DanzzBot v55 (YouTube Bypass)
 import os
 import io
 import requests
@@ -36,7 +36,6 @@ async def cancel_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("❌ Proses dibatalkan!", show_alert=True)
     try:
         await query.message.delete()
-        # Hapus file sampah di folder downloads
         for file in os.listdir('downloads'):
             if file.endswith('.part') or file.endswith('.ytdl') or file.endswith('.mp4'):
                 try: os.remove(os.path.join('downloads', file))
@@ -47,7 +46,7 @@ async def cancel_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v54. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v55. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -117,7 +116,7 @@ async def unmute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER (PAKE CANCEL), AI & GET IMAGE
+# FITUR DOWNLOADER (BYPASS YOUTUBE), AI & GET IMAGE
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
@@ -126,19 +125,36 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("⏳ Memproses... (Klik batal untuk berhenti)", reply_markup=InlineKeyboardMarkup(keyboard))
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_VIDEO)
-    ydl_opts = {'format': 'bestvideo+bestaudio/best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True, 'merge_output_format': 'mp4'}
+    
+    # BYPASS: Pake client Android biar ga kena limit YouTube
+    ydl_opts = {
+        'format': 'bestvideo+bestaudio/best', 
+        'outtmpl': 'downloads/%(id)s.%(ext)s', 
+        'quiet': True,
+        'merge_output_format': 'mp4',
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
+        'geo_bypass': True,
+        'nocheckcertificate': True
+    }
+    
     try:
         os.makedirs('downloads', exist_ok=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(context.args[0], download=True)
             file_path = ydl.prepare_filename(info)
+            
             if not os.path.exists(file_path):
                 base_path = os.path.splitext(file_path)[0]
                 for ext in ['.mp4', '.mkv', '.webm']:
-                    if os.path.exists(base_path + ext): file_path = base_path + ext; break
+                    if os.path.exists(base_path + ext):
+                        file_path = base_path + ext
+                        break
+                        
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
-        os.remove(file_path); await msg.delete()
-    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+        os.remove(file_path)
+        await msg.delete()
+    except Exception as e: 
+        await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/spotify [link_lagu]`")
@@ -539,7 +555,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v54 berjalan...")
+    print("[@Cancer666] Bot v55 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
