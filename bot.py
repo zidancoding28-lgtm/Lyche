@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v44 (Image Getter)
+# bot.py | DanzzBot v46 (All-in-One)
 import os
 import io
 import requests
@@ -31,14 +31,15 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v44. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v46. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📥 Media & Spotify", callback_data='menu_dl'), InlineKeyboardButton("🤖 AI Chat", callback_data='menu_ai')],
         [InlineKeyboardButton("🕸️ Scraper", callback_data='menu_scrape'), InlineKeyboardButton("📧 Temp Mail", callback_data='menu_email')],
         [InlineKeyboardButton("🎨 Gambar & Teks", callback_data='menu_img'), InlineKeyboardButton("🛠️ Dev Tools", callback_data='menu_dev')],
-        [InlineKeyboardButton("🎲 Generator", callback_data='menu_gen'), InlineKeyboardButton("🌐 Network", callback_data='menu_net')]
+        [InlineKeyboardButton("🎲 Generator", callback_data='menu_gen'), InlineKeyboardButton("🌐 Network", callback_data='menu_net')],
+        [InlineKeyboardButton("🎬 Cari Preset", callback_data='menu_preset')]
     ]
     await update.message.reply_text("Pilih tools:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -53,9 +54,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_dev': await query.edit_message_text("`/hash` | `/b64` | `/math` | `/caesar` | `/regex` | `/time`")
     elif query.data == 'menu_gen': await query.edit_message_text("`/usn` | `/pass` | `/fake` | `/luhn` | `/cat`")
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
+    elif query.data == 'menu_preset': await query.edit_message_text("Ketik `/caripreset [kata_kunci]`\nContoh: `/caripreset jj viral`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER, AI & IMAGE GETTER
+# FITUR DOWNLOADER, AI & GET IMAGE
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
@@ -68,34 +70,6 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_path = ydl.prepare_filename(info)
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
         os.remove(file_path)
-        await msg.delete()
-    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
-
-async def get_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("Format: `/getimg [link_gambar/web]`")
-    url = context.args[0]
-    msg = await update.message.reply_text("🖼️ Mengambil gambar...")
-    
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        r = requests.get(url, timeout=15, headers=headers)
-        
-        # Kalau link web, cari gambar pertamanya
-        if 'image' not in r.headers.get('Content-Type', ''):
-            soup = BeautifulSoup(r.text, 'html.parser')
-            img_tag = soup.find('meta', property='og:image') or soup.find('img')
-            if img_tag:
-                img_url = img_tag.get('content') if img_tag.name == 'meta' else img_tag.get('src')
-                if img_url.startswith('//'): img_url = 'https:' + img_url
-                elif img_url.startswith('/'):
-                    parsed = urllib.parse.urlparse(url)
-                    img_url = f"{parsed.scheme}://{parsed.netloc}{img_url}"
-                r = requests.get(img_url, timeout=15, headers=headers)
-            else:
-                return await msg.edit_text("❌ Nggak nemu gambar di link itu.")
-                
-        # Kirim sebagai foto
-        await update.message.reply_photo(photo=r.content, caption="✅ Gambar berhasil diambil!")
         await msg.delete()
     except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
@@ -117,14 +91,60 @@ async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.remove(file_path); await msg.delete()
     except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
+async def get_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Format: `/getimg [link_gambar/web]`")
+    url = context.args[0]
+    msg = await update.message.reply_text("🖼️ Mengambil gambar...")
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, timeout=15, headers=headers)
+        if 'image' not in r.headers.get('Content-Type', ''):
+            soup = BeautifulSoup(r.text, 'html.parser')
+            img_tag = soup.find('meta', property='og:image') or soup.find('img')
+            if img_tag:
+                img_url = img_tag.get('content') if img_tag.name == 'meta' else img_tag.get('src')
+                if img_url.startswith('//'): img_url = 'https:' + img_url
+                elif img_url.startswith('/'):
+                    parsed = urllib.parse.urlparse(url)
+                    img_url = f"{parsed.scheme}://{parsed.netloc}{img_url}"
+                r = requests.get(img_url, timeout=15, headers=headers)
+            else: return await msg.edit_text("❌ Nggak nemu gambar.")
+        await update.message.reply_photo(photo=r.content, caption="✅ Gambar berhasil diambil!")
+        await msg.delete()
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+
 async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args) if context.args else update.message.text
     msg = await update.message.reply_text("🤖 Mikir...")
     try: await msg.edit_text(requests.get(f"https://text.pollinations.ai/{requests.utils.quote(prompt)}", timeout=15).text)
     except: await msg.edit_text("❌ Error AI.")
 
+async def cari_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Format: `/caripreset [kata_kunci]`")
+    keyword = " ".join(context.args)
+    msg = await update.message.reply_text(f"🔍 Mencari preset: **{keyword}**...", parse_mode='Markdown')
+    try:
+        query = f"site:capcut.com template {keyword} OR site:alightmotion.com {keyword}"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        r = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        results = soup.find_all('a', class_='result__url')
+        if not results: return await msg.edit_text("❌ Nggak nemu link preset.")
+        text = f"🎬 **Hasil Preset:**\n\n"
+        count = 0
+        for res in results:
+            if count >= 5: break
+            link = res.get('href')
+            if link and link.startswith('http'):
+                text += f"🔗 {link}\n\n"
+                count += 1
+        if count == 0: await msg.edit_text("❌ Link nggak valid.")
+        else: await msg.edit_text(text, parse_mode='Markdown', disable_web_page_preview=True)
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+
 # ═══════════════════════════════════════════════════════════
-# FITUR SCRAPER
+# FITUR SCRAPER & TEMP MAIL
 # ═══════════════════════════════════════════════════════════
 async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/scrape [url]`")
@@ -162,9 +182,6 @@ async def scrape_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.delete()
     except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
-# ═══════════════════════════════════════════════════════════
-# FITUR TEMP MAIL
-# ═══════════════════════════════════════════════════════════
 async def fake_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     msg = await update.message.reply_text("📧 Bikin email...")
@@ -406,6 +423,7 @@ def main():
     app.add_handler(CommandHandler("spotify", spotify_download))
     app.add_handler(CommandHandler("getimg", get_image))
     app.add_handler(CommandHandler("ai", ai_chat))
+    app.add_handler(CommandHandler("caripreset", cari_preset))
     app.add_handler(CommandHandler("scrape", web_scraper))
     app.add_handler(CommandHandler("scrapeimg", scrape_images))
     
@@ -438,7 +456,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v44 berjalan...")
+    print("[@Cancer666] Bot v46 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
