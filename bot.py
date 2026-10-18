@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v50 (Advanced Admin Panel)
+# bot.py | DanzzBot v51 (Fixed Admin Panel)
 import os
 import io
 import requests
@@ -32,7 +32,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v50. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v51. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -59,56 +59,65 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_admin': await query.edit_message_text("👑 **Admin Panel:**\n`/kick @username` (Tendang)\n`/mute @username` (Bisin)\n`/unmute @username` (Buka bisin)\n\n*(Bot harus jadi Admin grup)*")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR ADMIN PANEL (KICK, MUTE, UNMUTE)
+# FITUR ADMIN PANEL (KICK, MUTE, UNMUTE - FIXED)
 # ═══════════════════════════════════════════════════════════
+async def get_target_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.reply_to_message:
+        return update.message.reply_to_message.from_user.id, update.message.reply_to_message.from_user.first_name
+    
+    if context.args and context.args[0].isdigit():
+        return int(context.args[0]), "Target"
+        
+    if context.args and context.args[0].startswith("@"):
+        username = context.args[0].replace("@", "")
+        async for member in context.bot.get_chat_members(update.effective_chat.id):
+            if member.user.username == username:
+                return member.user.id, member.user.first_name
+                
+    return None, None
+
 async def kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ["group", "supergroup"]:
-        return await update.message.reply_text("❌ Perintah ini cuma bisa dipakai di grup.")
+        return await update.message.reply_text("❌ Cuma bisa di grup.")
         
-    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
-    if bot_member.status != "administrator":
-        return await update.message.reply_text("❌ Bot harus jadi Admin grup dulu.")
-        
-    target_username = context.args[0].replace("@", "") if context.args else (update.message.reply_to_message.from_user.username if update.message.reply_to_message else None)
-    if not target_username:
-        return await update.message.reply_text("Format: `/kick @username` atau reply pesannya.")
+    target_id, name = await get_target_id(update, context)
+    if not target_id:
+        return await update.message.reply_text("❌ User nggak ketemu. Pastiin dia udah pernah chat di grup ini, atau reply pesannya.")
         
     try:
-        target_user = await context.bot.get_chat(target_username)
-        await context.bot.ban_chat_member(update.effective_chat.id, target_user.id)
-        await context.bot.unban_chat_member(update.effective_chat.id, target_user.id)
-        await update.message.reply_text(f"👢 {target_username} udah ditendang dari grup!")
+        await context.bot.ban_chat_member(update.effective_chat.id, target_id)
+        await context.bot.unban_chat_member(update.effective_chat.id, target_id)
+        await update.message.reply_text(f"👢 {name} udah ditendang!")
     except Exception as e:
-        await update.message.reply_text(f"❌ Gagal nendang: `{str(e)}`")
+        await update.message.reply_text(f"❌ Gagal (Bot harus Admin): `{str(e)}`")
 
 async def mute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ["group", "supergroup"]:
         return await update.message.reply_text("❌ Cuma bisa di grup.")
-    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
-    if bot_member.status != "administrator": return await update.message.reply_text("❌ Bot harus jadi Admin.")
-    
-    target_username = context.args[0].replace("@", "") if context.args else (update.message.reply_to_message.from_user.username if update.message.reply_to_message else None)
-    if not target_username: return await update.message.reply_text("Format: `/mute @username`")
-    
+        
+    target_id, name = await get_target_id(update, context)
+    if not target_id:
+        return await update.message.reply_text("❌ User nggak ketemu.")
+        
     try:
-        target_user = await context.bot.get_chat(target_username)
-        await context.bot.restrict_chat_member(update.effective_chat.id, target_user.id, permissions=ChatPermissions(can_send_messages=False))
-        await update.message.reply_text(f"🔇 {target_username} udah dibisin!")
-    except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
+        await context.bot.restrict_chat_member(update.effective_chat.id, target_id, permissions=ChatPermissions(can_send_messages=False))
+        await update.message.reply_text(f"🔇 {name} udah dibisin!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Gagal (Bot harus Admin): `{str(e)}`")
 
 async def unmute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type not in ["group", "supergroup"]: return await update.message.reply_text("❌ Cuma bisa di grup.")
-    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
-    if bot_member.status != "administrator": return await update.message.reply_text("❌ Bot harus jadi Admin.")
-    
-    target_username = context.args[0].replace("@", "") if context.args else (update.message.reply_to_message.from_user.username if update.message.reply_to_message else None)
-    if not target_username: return await update.message.reply_text("Format: `/unmute @username`")
-    
+    if update.effective_chat.type not in ["group", "supergroup"]:
+        return await update.message.reply_text("❌ Cuma bisa di grup.")
+        
+    target_id, name = await get_target_id(update, context)
+    if not target_id:
+        return await update.message.reply_text("❌ User nggak ketemu.")
+        
     try:
-        target_user = await context.bot.get_chat(target_username)
-        await context.bot.restrict_chat_member(update.effective_chat.id, target_user.id, permissions=ChatPermissions(can_send_messages=True))
-        await update.message.reply_text(f"🔊 {target_username} udah bisa chat lagi!")
-    except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
+        await context.bot.restrict_chat_member(update.effective_chat.id, target_id, permissions=ChatPermissions(can_send_messages=True))
+        await update.message.reply_text(f"🔊 {name} udah bisa chat lagi!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR DOWNLOADER, AI & GET IMAGE
@@ -323,7 +332,7 @@ async def quote_maker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🖼️ Bikin quote...")
     try:
         img = Image.new('RGB', (600, 300), color=(21, 32, 43))
-        d = ImageDraw.Draw(img); d.text((30, 30), name.strip(), fill=(255, 255, 255)); d.text((30, 120),quote.strip()[:50], fill=(255, 255, 255))
+        d = ImageDraw.Draw(img); d.text((30, 30), name.strip(), fill=(255, 255, 255)); d.text((30, 120), quote.strip()[:50], fill=(255, 255, 255))
         buf = io.BytesIO(); img.save(buf, format='PNG'); buf.seek(0)
         await update.message.reply_photo(photo=buf, caption="✅ Quote."); await msg.delete()
     except: await msg.edit_text("❌ Gagal.")
@@ -524,7 +533,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v50 berjalan...")
+    print("[@Cancer666] Bot v51 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
