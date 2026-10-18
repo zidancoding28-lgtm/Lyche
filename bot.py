@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v38 (Fixed Spotify via YT)
+ # bot.py | DanzzBot v38 (Fixed Spotify via YT)
 import os
 import io
 import requests
@@ -454,4 +454,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-```
