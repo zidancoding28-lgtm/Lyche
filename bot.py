@@ -1,6 +1,4 @@
-# bot.py | DanzzBot v37 (Spotify MP3 Integration)
-# Tambahan: Fungsi download lagu langsung dari link Spotify.
-
+# bot.py | DanzzBot v38 (Fixed Spotify via YT)
 import os
 import io
 import requests
@@ -14,11 +12,15 @@ import hashlib
 import base64
 import json
 import urllib.parse
+import urllib3
 from bs4 import BeautifulSoup
 from datetime import datetime
 from PIL import Image, ImageDraw
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+
+# Matiin warning SSL biar ga berisik di log
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BOT_TOKEN = "8965097448:AAGM6xwbkjXPRwkb-9jd2fVCdA0p_pOluKM"
 ADMIN_ID = 8901247073
@@ -26,11 +28,14 @@ ADMIN_ID = 8901247073
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 user_sessions = {}
 
+MORSE_DICT = { 'A':'.-', 'B':'-...', 'C':'-.-.', 'D':'-..', 'E':'.', 'F':'..-.', 'G':'--.', 'H':'....', 'I':'..', 'J':'.---', 'K':'-.-', 'L':'.-..', 'M':'--', 'N':'-.', 'O':'---', 'P':'.--.', 'Q':'--.-', 'R':'.-.', 'S':'...', 'T':'-', 'U':'..-', 'V':'...-', 'W':'.--', 'X':'-..-', 'Y':'-.--', 'Z':'--..', '1':'.----', '2':'..---', '3':'...--', '4':'....-', '5':'.....', '6':'-....', '7':'--...', '8':'---..', '9':'----.', '0':'-----'}
+MORSE_DECODE = {v: k for k, v in MORSE_DICT.items()}
+
 # ═══════════════════════════════════════════════════════════
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v37. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v38. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -54,7 +59,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER (VIDEO & SPOTIFY)
+# FITUR DOWNLOADER
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
@@ -78,44 +83,44 @@ async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "spotify.com" not in url:
         return await update.message.reply_text("❌ Link harus dari Spotify.")
         
-    msg = await update.message.reply_text("🎵 Mencari lagu di Spotify...")
+    msg = await update.message.reply_text("🎵 Mencari lagu...")
     
     try:
-        # Menggunakan API publik (spotify-downloader.com) sebagai perantara
-        api_url = f"https://api.spotify-downloader.com/get?url={requests.utils.quote(url)}"
-        res = requests.get(api_url, timeout=15).json()
+        # 1. Ambil judul lagu via Oembed (Resmi)
+        res = requests.get(f"https://open.spotify.com/oembed?url={url}", timeout=10, verify=False).json()
+        title = res.get("title", "Unknown Song")
         
-        if res.get("status") == "success":
-            track = res["data"]
-            title = track.get("title", "Unknown")
-            artist = track.get("artist", "Unknown")
-            download_url = track.get("download_url")
+        # 2. Cari audio di YouTube
+        await msg.edit_text(f"⬇️ Mengunduh audio: **{title}**...")
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'downloads/%(id)s.%(ext)s',
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{title} audio", download=True)
+            video = info['entries'][0]
+            file_path = ydl.prepare_filename(video).replace('.webm', '.mp3').replace('.m4a', '.mp3')
             
-            await msg.edit_text(f"⬇️ Mengunduh: **{title} - {artist}**...")
-            
-            # Download file MP3 ke Termux
-            audio_data = requests.get(download_url, timeout=30)
-            file_path = f"downloads/{title} - {artist}.mp3"
-            os.makedirs('downloads', exist_ok=True)
-            
-            with open(file_path, 'wb') as f:
-                f.write(audio_data.content)
-                
-            # Kirim ke Telegram
-            await update.message.reply_audio(
-                audio=open(file_path, 'rb'), 
-                title=title, 
-                performer=artist,
-                caption=f"✅ **{title}**\n👤 {artist}"
-            )
-            
-            os.remove(file_path)
-            await msg.delete()
-        else:
-            await msg.edit_text("❌ Lagu tidak ditemukan atau API limit.")
-            
+        # 3. Kirim MP3
+        await update.message.reply_audio(
+            audio=open(file_path, 'rb'), 
+            title=title, 
+            caption=f"✅ **{title}**\n*(Downloaded via DanzzBot)*"
+        )
+        
+        os.remove(file_path)
+        await msg.delete()
+        
     except Exception as e:
-        await msg.edit_text(f"❌ Gagal mendownload: `{str(e)}`")
+        await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR AI & SCRAPER
@@ -444,8 +449,9 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v37 berjalan...")
+    print("[@Cancer666] Bot v38 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
     main()
+```
