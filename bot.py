@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v42 (Full Combined Build)
+# bot.py | DanzzBot v44 (Image Getter)
 import os
 import io
 import requests
@@ -27,14 +27,11 @@ ADMIN_ID = 8901247073
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 user_sessions = {}
 
-MORSE_DICT = { 'A':'.-', 'B':'-...', 'C':'-.-.', 'D':'-..', 'E':'.', 'F':'..-.', 'G':'--.', 'H':'....', 'I':'..', 'J':'.---', 'K':'-.-', 'L':'.-..', 'M':'--', 'N':'-.', 'O':'---', 'P':'.--.', 'Q':'--.-', 'R':'.-.', 'S':'...', 'T':'-', 'U':'..-', 'V':'...-', 'W':'.--', 'X':'-..-', 'Y':'-.--', 'Z':'--..', '1':'.----', '2':'..---', '3':'...--', '4':'....-', '5':'.....', '6':'-....', '7':'--...', '8':'---..', '9':'----.', '0':'-----'}
-MORSE_DECODE = {v: k for k, v in MORSE_DICT.items()}
-
 # ═══════════════════════════════════════════════════════════
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v42. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v44. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -48,9 +45,9 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == 'menu_dl': await query.edit_message_text("📥 **Downloader:**\n`/dl [link]` (TikTok/IG/YT)\n`/spotify [link_lagu]`")
+    if query.data == 'menu_dl': await query.edit_message_text("📥 **Downloader:**\n`/dl [link]` (Video)\n`/spotify [link]` (Lagu)\n`/getimg [link]` (Ambil Gambar)")
     elif query.data == 'menu_ai': await query.edit_message_text("Ketik pesan bebas.")
-    elif query.data == 'menu_scrape': await query.edit_message_text("`/scrape [url]` | `/scrapeimg [url]` | `/webp [link_gambar]`")
+    elif query.data == 'menu_scrape': await query.edit_message_text("`/scrape [url]` | `/scrapeimg [url]`")
     elif query.data == 'menu_email': await query.edit_message_text("Ketik `/email` lalu `/inbox`.")
     elif query.data == 'menu_img': await query.edit_message_text("`/tweet` | `/quote` | `/struk` | Kirim Foto buat Filter & ASCII.")
     elif query.data == 'menu_dev': await query.edit_message_text("`/hash` | `/b64` | `/math` | `/caesar` | `/regex` | `/time`")
@@ -58,7 +55,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER & AI
+# FITUR DOWNLOADER, AI & IMAGE GETTER
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
@@ -71,6 +68,34 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_path = ydl.prepare_filename(info)
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
         os.remove(file_path)
+        await msg.delete()
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+
+async def get_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Format: `/getimg [link_gambar/web]`")
+    url = context.args[0]
+    msg = await update.message.reply_text("🖼️ Mengambil gambar...")
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        r = requests.get(url, timeout=15, headers=headers)
+        
+        # Kalau link web, cari gambar pertamanya
+        if 'image' not in r.headers.get('Content-Type', ''):
+            soup = BeautifulSoup(r.text, 'html.parser')
+            img_tag = soup.find('meta', property='og:image') or soup.find('img')
+            if img_tag:
+                img_url = img_tag.get('content') if img_tag.name == 'meta' else img_tag.get('src')
+                if img_url.startswith('//'): img_url = 'https:' + img_url
+                elif img_url.startswith('/'):
+                    parsed = urllib.parse.urlparse(url)
+                    img_url = f"{parsed.scheme}://{parsed.netloc}{img_url}"
+                r = requests.get(img_url, timeout=15, headers=headers)
+            else:
+                return await msg.edit_text("❌ Nggak nemu gambar di link itu.")
+                
+        # Kirim sebagai foto
+        await update.message.reply_photo(photo=r.content, caption="✅ Gambar berhasil diambil!")
         await msg.delete()
     except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
@@ -99,7 +124,7 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: await msg.edit_text("❌ Error AI.")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR SCRAPER & WEBP
+# FITUR SCRAPER
 # ═══════════════════════════════════════════════════════════
 async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/scrape [url]`")
@@ -134,19 +159,6 @@ async def scrape_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for i, img_url in enumerate(img_urls[:5]):
             try: await update.message.reply_photo(photo=img_url, caption=f"Gambar {i+1}")
             except: pass
-        await msg.delete()
-    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
-
-async def convert_webp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("Format: `/webp [link_gambar]`")
-    url = context.args[0]
-    msg = await update.message.reply_text("🖼️ Konversi ke WebP...")
-    try:
-        r = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
-        r.raise_for_status()
-        img = Image.open(io.BytesIO(r.content)).convert("RGBA")
-        buf = io.BytesIO(); img.save(buf, format="WEBP", quality=80); buf.seek(0)
-        await update.message.reply_document(document=buf, filename="image.webp", caption="✅ WebP Berhasil!")
         await msg.delete()
     except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
@@ -392,10 +404,10 @@ def main():
     
     app.add_handler(CommandHandler("dl", download_media))
     app.add_handler(CommandHandler("spotify", spotify_download))
+    app.add_handler(CommandHandler("getimg", get_image))
     app.add_handler(CommandHandler("ai", ai_chat))
     app.add_handler(CommandHandler("scrape", web_scraper))
     app.add_handler(CommandHandler("scrapeimg", scrape_images))
-    app.add_handler(CommandHandler("webp", convert_webp))
     
     app.add_handler(CommandHandler("email", fake_email))
     app.add_handler(CommandHandler("inbox", check_inbox))
@@ -426,7 +438,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v42 berjalan...")
+    print("[@Cancer666] Bot v44 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
