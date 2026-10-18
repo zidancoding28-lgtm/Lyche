@@ -1,4 +1,6 @@
-# bot.py | DanzzBot v32.2
+# bot.py | DanzzBot v33 (Final Clean Build)
+# Fitur: AI, Downloader, Scraper, Image Gen, Dev Tools, Network, & Generators.
+
 import os
 import io
 import requests
@@ -27,8 +29,11 @@ user_sessions = {}
 MORSE_DICT = { 'A':'.-', 'B':'-...', 'C':'-.-.', 'D':'-..', 'E':'.', 'F':'..-.', 'G':'--.', 'H':'....', 'I':'..', 'J':'.---', 'K':'-.-', 'L':'.-..', 'M':'--', 'N':'-.', 'O':'---', 'P':'.--.', 'Q':'--.-', 'R':'.-.', 'S':'...', 'T':'-', 'U':'..-', 'V':'...-', 'W':'.--', 'X':'-..-', 'Y':'-.--', 'Z':'--..', '1':'.----', '2':'..---', '3':'...--', '4':'....-', '5':'.....', '6':'-....', '7':'--...', '8':'---..', '9':'----.', '0':'-----'}
 MORSE_DECODE = {v: k for k, v in MORSE_DICT.items()}
 
+# ═══════════════════════════════════════════════════════════
+# CORE & MENU
+# ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v32.2. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v33. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -51,6 +56,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_gen': await query.edit_message_text("`/usn` | `/pass` | `/fake` | `/luhn` | `/cat`")
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
 
+# ═══════════════════════════════════════════════════════════
+# DOWNLOADER, AI & SCRAPER
+# ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
     msg = await update.message.reply_text("⏳ Memproses...")
@@ -86,6 +94,9 @@ async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: 
         await msg.edit_text("❌ Gagal Scrape.")
 
+# ═══════════════════════════════════════════════════════════
+# TEMP MAIL
+# ═══════════════════════════════════════════════════════════
 async def fake_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     msg = await update.message.reply_text("📧 Bikin email...")
@@ -117,6 +128,9 @@ async def check_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: 
         await msg.edit_text("❌ Gagal.")
 
+# ═══════════════════════════════════════════════════════════
+# IMAGE & TEXT GENERATORS
+# ═══════════════════════════════════════════════════════════
 async def handle_ascii(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("💻 ASCII Art...")
     try:
@@ -182,6 +196,9 @@ async def fake_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: 
         await msg.edit_text("❌ Gagal.")
 
+# ═══════════════════════════════════════════════════════════
+# DEV TOOLS & GENERATORS
+# ═══════════════════════════════════════════════════════════
 async def hash_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/hash [teks]`")
     text = " ".join(context.args)
@@ -282,6 +299,9 @@ async def random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: 
         await msg.edit_text("❌ Gagal.")
 
+# ═══════════════════════════════════════════════════════════
+# NETWORK TOOLS
+# ═══════════════════════════════════════════════════════════
 async def ip_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/ip [ip]`")
     msg = await update.message.reply_text("🌍 Cek IP...")
@@ -334,31 +354,28 @@ async def fake_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: 
         await msg.edit_text("❌ Gagal.")
 
+# ═══════════════════════════════════════════════════════════
+# MAIN EXECUTION
+# ═══════════════════════════════════════════════════════════
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(CallbackQueryHandler(menu_callback))
+    # Core
+        app.add_handler(CommandHandler("pass", pass_gen))
+    app.add_handler(CommandHandler("fake", fake_identity))
+    app.add_handler(CommandHandler("luhn", luhn_checker))
+    app.add_handler(CommandHandler("cat", random_cat))
     
-    app.add_handler(CommandHandler("dl", download_media))
-    app.add_handler(CommandHandler("ai", ai_chat))
-    app.add_handler(CommandHandler("scrape", web_scraper))
+    app.add_handler(CommandHandler("ip", ip_tracker))
+    app.add_handler(CommandHandler("short", shortlink_gen))
+    app.add_handler(CommandHandler("cuaca", weather_check))
+    app.add_handler(CommandHandler("translate", translate_text))
+    app.add_handler(CommandHandler("loc", fake_location))
     
-    app.add_handler(CommandHandler("email", fake_email))
-    app.add_handler(CommandHandler("inbox", check_inbox))
-    
-    app.add_handler(CommandHandler("quote", quote_maker))
-    app.add_handler(CommandHandler("fakewa", fake_wa_chat))
-    app.add_handler(CommandHandler("struk", fake_receipt))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_ascii))
-    
-    app.add_handler(CommandHandler("hash", hash_gen))
-    app.add_handler(CommandHandler("b64", b64_tool))
-    app.add_handler(CommandHandler("math", math_calc))
-    app.add_handler(CommandHandler("caesar", caesar_cipher))
-    app.add_handler(CommandHandler("regex", regex_tester))
-    app.add_handler(CommandHandler("time", timestamp_converter))
-    
-    app.add_handler(CommandHandler("usn", usn_gen))
-    app.add_handler(CommandHandler("pass", pass_g
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
+
+    print("[@Cancer666] Bot v32.2 berjalan...")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
