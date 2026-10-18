@@ -1,5 +1,5 @@
-# bot.py | DanzzBot v35 (Complete Master Build)
-# Fitur: AI, Downloader, Scraper, Image Gen, Dev Tools, Network, & Generators.
+# bot.py | DanzzBot v37 (Spotify MP3 Integration)
+# Tambahan: Fungsi download lagu langsung dari link Spotify.
 
 import os
 import io
@@ -26,18 +26,15 @@ ADMIN_ID = 8901247073
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 user_sessions = {}
 
-MORSE_DICT = { 'A':'.-', 'B':'-...', 'C':'-.-.', 'D':'-..', 'E':'.', 'F':'..-.', 'G':'--.', 'H':'....', 'I':'..', 'J':'.---', 'K':'-.-', 'L':'.-..', 'M':'--', 'N':'-.', 'O':'---', 'P':'.--.', 'Q':'--.-', 'R':'.-.', 'S':'...', 'T':'-', 'U':'..-', 'V':'...-', 'W':'.--', 'X':'-..-', 'Y':'-.--', 'Z':'--..', '1':'.----', '2':'..---', '3':'...--', '4':'....-', '5':'.....', '6':'-....', '7':'--...', '8':'---..', '9':'----.', '0':'-----'}
-MORSE_DECODE = {v: k for k, v in MORSE_DICT.items()}
-
 # ═══════════════════════════════════════════════════════════
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v35. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v37. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("📥 Downloader", callback_data='menu_dl'), InlineKeyboardButton("🤖 AI Chat", callback_data='menu_ai')],
+        [InlineKeyboardButton("📥 Media & Spotify", callback_data='menu_dl'), InlineKeyboardButton("🤖 AI Chat", callback_data='menu_ai')],
         [InlineKeyboardButton("🕸️ Scraper", callback_data='menu_scrape'), InlineKeyboardButton("📧 Temp Mail", callback_data='menu_email')],
         [InlineKeyboardButton("🎨 Gambar & Teks", callback_data='menu_img'), InlineKeyboardButton("🛠️ Dev Tools", callback_data='menu_dev')],
         [InlineKeyboardButton("🎲 Generator", callback_data='menu_gen'), InlineKeyboardButton("🌐 Network", callback_data='menu_net')]
@@ -47,7 +44,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == 'menu_dl': await query.edit_message_text("Ketik `/dl [link]`")
+    if query.data == 'menu_dl': await query.edit_message_text("📥 **Downloader:**\n`/dl [link_video]` (TikTok/IG/YT)\n`/spotify [link_lagu]` (Download MP3)")
     elif query.data == 'menu_ai': await query.edit_message_text("Ketik pesan bebas.")
     elif query.data == 'menu_scrape': await query.edit_message_text("Ketik `/scrape [url]`")
     elif query.data == 'menu_email': await query.edit_message_text("Ketik `/email` lalu `/inbox`.")
@@ -57,11 +54,11 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
 
 # ═══════════════════════════════════════════════════════════
-# DOWNLOADER, AI & SCRAPER
+# FITUR DOWNLOADER (VIDEO & SPOTIFY)
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
-    msg = await update.message.reply_text("⏳ Memproses...")
+    msg = await update.message.reply_text("⏳ Memproses video...")
     ydl_opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
     try:
         os.makedirs('downloads', exist_ok=True)
@@ -74,6 +71,55 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: 
         await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
+async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Format: `/spotify [link_lagu_spotify]`")
+    
+    url = context.args[0]
+    if "spotify.com" not in url:
+        return await update.message.reply_text("❌ Link harus dari Spotify.")
+        
+    msg = await update.message.reply_text("🎵 Mencari lagu di Spotify...")
+    
+    try:
+        # Menggunakan API publik (spotify-downloader.com) sebagai perantara
+        api_url = f"https://api.spotify-downloader.com/get?url={requests.utils.quote(url)}"
+        res = requests.get(api_url, timeout=15).json()
+        
+        if res.get("status") == "success":
+            track = res["data"]
+            title = track.get("title", "Unknown")
+            artist = track.get("artist", "Unknown")
+            download_url = track.get("download_url")
+            
+            await msg.edit_text(f"⬇️ Mengunduh: **{title} - {artist}**...")
+            
+            # Download file MP3 ke Termux
+            audio_data = requests.get(download_url, timeout=30)
+            file_path = f"downloads/{title} - {artist}.mp3"
+            os.makedirs('downloads', exist_ok=True)
+            
+            with open(file_path, 'wb') as f:
+                f.write(audio_data.content)
+                
+            # Kirim ke Telegram
+            await update.message.reply_audio(
+                audio=open(file_path, 'rb'), 
+                title=title, 
+                performer=artist,
+                caption=f"✅ **{title}**\n👤 {artist}"
+            )
+            
+            os.remove(file_path)
+            await msg.delete()
+        else:
+            await msg.edit_text("❌ Lagu tidak ditemukan atau API limit.")
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ Gagal mendownload: `{str(e)}`")
+
+# ═══════════════════════════════════════════════════════════
+# FITUR AI & SCRAPER
+# ═══════════════════════════════════════════════════════════
 async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args) if context.args else update.message.text
     msg = await update.message.reply_text("🤖 Mikir...")
@@ -95,7 +141,7 @@ async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Gagal Scrape.")
 
 # ═══════════════════════════════════════════════════════════
-# TEMP MAIL
+# FITUR TEMP MAIL
 # ═══════════════════════════════════════════════════════════
 async def fake_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -129,7 +175,7 @@ async def check_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
-# IMAGE & TEXT GENERATORS
+# FITUR GAMBAR & TEKS
 # ═══════════════════════════════════════════════════════════
 async def handle_ascii(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("💻 ASCII Art...")
@@ -197,7 +243,7 @@ async def fake_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
-# DEV TOOLS & GENERATORS
+# FITUR DEV TOOLS & GENERATORS
 # ═══════════════════════════════════════════════════════════
 async def hash_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/hash [teks]`")
@@ -300,7 +346,7 @@ async def random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
-# NETWORK TOOLS
+# FITUR NETWORK TOOLS
 # ═══════════════════════════════════════════════════════════
 async def ip_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/ip [ip]`")
@@ -365,6 +411,7 @@ def main():
     app.add_handler(CallbackQueryHandler(menu_callback))
     
     app.add_handler(CommandHandler("dl", download_media))
+    app.add_handler(CommandHandler("spotify", spotify_download))
     app.add_handler(CommandHandler("ai", ai_chat))
     app.add_handler(CommandHandler("scrape", web_scraper))
     
@@ -397,7 +444,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v35 berjalan...")
+    print("[@Cancer666] Bot v37 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
