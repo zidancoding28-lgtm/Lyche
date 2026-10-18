@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v49 (Group Manager)
+# bot.py | DanzzBot v50 (Advanced Admin Panel)
 import os
 import io
 import requests
@@ -16,7 +16,7 @@ import urllib3
 from bs4 import BeautifulSoup
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageOps
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ChatAction
 
@@ -32,7 +32,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v49. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v50. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -40,7 +40,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🕸️ Scraper", callback_data='menu_scrape'), InlineKeyboardButton("📧 Temp Mail", callback_data='menu_email')],
         [InlineKeyboardButton("🎨 Gambar & Teks", callback_data='menu_img'), InlineKeyboardButton("🛠️ Dev Tools", callback_data='menu_dev')],
         [InlineKeyboardButton("🎲 Generator", callback_data='menu_gen'), InlineKeyboardButton("🌐 Network", callback_data='menu_net')],
-        [InlineKeyboardButton("🎬 Cari Preset", callback_data='menu_preset'), InlineKeyboardButton("👑 Admin Tools", callback_data='menu_admin')]
+        [InlineKeyboardButton("🎬 Cari Preset", callback_data='menu_preset'), InlineKeyboardButton("👑 Admin Panel", callback_data='menu_admin')]
     ]
     await update.message.reply_text("Pilih tools:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -56,10 +56,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_gen': await query.edit_message_text("`/usn` | `/pass` | `/fake` | `/luhn` | `/cat`")
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
     elif query.data == 'menu_preset': await query.edit_message_text("Ketik `/caripreset [kata_kunci]`")
-    elif query.data == 'menu_admin': await query.edit_message_text("👑 **Admin Tools:**\n`/kick` (Reply pesan orang, bot harus Admin)")
+    elif query.data == 'menu_admin': await query.edit_message_text("👑 **Admin Panel:**\n`/kick @username` (Tendang)\n`/mute @username` (Bisin)\n`/unmute @username` (Buka bisin)\n\n*(Bot harus jadi Admin grup)*")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR ADMIN (KICK)
+# FITUR ADMIN PANEL (KICK, MUTE, UNMUTE)
 # ═══════════════════════════════════════════════════════════
 async def kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ["group", "supergroup"]:
@@ -67,20 +67,48 @@ async def kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
     if bot_member.status != "administrator":
-        return await update.message.reply_text("❌ Bot harus jadi Admin grup dulu buat nendang orang.")
+        return await update.message.reply_text("❌ Bot harus jadi Admin grup dulu.")
         
-    if not update.message.reply_to_message:
-        return await update.message.reply_text("❌ Reply pesan orang yang mau ditendang, baru ketik /kick.")
+    target_username = context.args[0].replace("@", "") if context.args else (update.message.reply_to_message.from_user.username if update.message.reply_to_message else None)
+    if not target_username:
+        return await update.message.reply_text("Format: `/kick @username` atau reply pesannya.")
         
-    target_user = update.message.reply_to_message.from_user
-    target_id = target_user.id
-    
     try:
-        await context.bot.ban_chat_member(update.effective_chat.id, target_id)
-        await context.bot.unban_chat_member(update.effective_chat.id, target_id)
-        await update.message.reply_text(f"👢 {target_user.first_name} udah ditendang dari grup!")
+        target_user = await context.bot.get_chat(target_username)
+        await context.bot.ban_chat_member(update.effective_chat.id, target_user.id)
+        await context.bot.unban_chat_member(update.effective_chat.id, target_user.id)
+        await update.message.reply_text(f"👢 {target_username} udah ditendang dari grup!")
     except Exception as e:
         await update.message.reply_text(f"❌ Gagal nendang: `{str(e)}`")
+
+async def mute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type not in ["group", "supergroup"]:
+        return await update.message.reply_text("❌ Cuma bisa di grup.")
+    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
+    if bot_member.status != "administrator": return await update.message.reply_text("❌ Bot harus jadi Admin.")
+    
+    target_username = context.args[0].replace("@", "") if context.args else (update.message.reply_to_message.from_user.username if update.message.reply_to_message else None)
+    if not target_username: return await update.message.reply_text("Format: `/mute @username`")
+    
+    try:
+        target_user = await context.bot.get_chat(target_username)
+        await context.bot.restrict_chat_member(update.effective_chat.id, target_user.id, permissions=ChatPermissions(can_send_messages=False))
+        await update.message.reply_text(f"🔇 {target_username} udah dibisin!")
+    except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
+
+async def unmute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type not in ["group", "supergroup"]: return await update.message.reply_text("❌ Cuma bisa di grup.")
+    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
+    if bot_member.status != "administrator": return await update.message.reply_text("❌ Bot harus jadi Admin.")
+    
+    target_username = context.args[0].replace("@", "") if context.args else (update.message.reply_to_message.from_user.username if update.message.reply_to_message else None)
+    if not target_username: return await update.message.reply_text("Format: `/unmute @username`")
+    
+    try:
+        target_user = await context.bot.get_chat(target_username)
+        await context.bot.restrict_chat_member(update.effective_chat.id, target_user.id, permissions=ChatPermissions(can_send_messages=True))
+        await update.message.reply_text(f"🔊 {target_username} udah bisa chat lagi!")
+    except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR DOWNLOADER, AI & GET IMAGE
@@ -295,7 +323,7 @@ async def quote_maker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🖼️ Bikin quote...")
     try:
         img = Image.new('RGB', (600, 300), color=(21, 32, 43))
-        d = ImageDraw.Draw(img); d.text((30, 30), name.strip(), fill=(255, 255, 255)); d.text((30, 120), quote.strip()[:50], fill=(255, 255, 255))
+        d = ImageDraw.Draw(img); d.text((30, 30), name.strip(), fill=(255, 255, 255)); d.text((30, 120),quote.strip()[:50], fill=(255, 255, 255))
         buf = io.BytesIO(); img.save(buf, format='PNG'); buf.seek(0)
         await update.message.reply_photo(photo=buf, caption="✅ Quote."); await msg.delete()
     except: await msg.edit_text("❌ Gagal.")
@@ -491,10 +519,12 @@ def main():
     
     # Admin Tools
     app.add_handler(CommandHandler("kick", kick_member))
+    app.add_handler(CommandHandler("mute", mute_member))
+    app.add_handler(CommandHandler("unmute", unmute_member))
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v49 berjalan...")
+    print("[@Cancer666] Bot v50 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
