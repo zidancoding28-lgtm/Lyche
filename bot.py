@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v47 (Full Combined)
+# bot.py | DanzzBot v48 (Full Professional)
 import os
 import io
 import requests
@@ -18,6 +18,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageOps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.constants import ChatAction
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -31,7 +32,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v47. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v48. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -62,6 +63,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
     msg = await update.message.reply_text("⏳ Memproses...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_VIDEO)
     ydl_opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
     try:
         os.makedirs('downloads', exist_ok=True)
@@ -78,6 +80,7 @@ async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0]
     if "spotify.com" not in url: return await update.message.reply_text("❌ Link harus Spotify.")
     msg = await update.message.reply_text("🎵 Mencari lagu...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     try:
         res = requests.get(f"https://open.spotify.com/oembed?url={url}", timeout=10, verify=False).json()
         title = res.get("title", "Unknown")
@@ -95,6 +98,7 @@ async def get_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/getimg [link_gambar/web]`")
     url = context.args[0]
     msg = await update.message.reply_text("🖼️ Mengambil gambar...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(url, timeout=15, headers=headers)
@@ -116,24 +120,21 @@ async def get_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args) if context.args else update.message.text
     msg = await update.message.reply_text("🤖 Mikir...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     try: await msg.edit_text(requests.get(f"https://text.pollinations.ai/{requests.utils.quote(prompt)}", timeout=15).text)
     except: await msg.edit_text("❌ Error AI.")
 
 async def cari_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/caripreset [kata_kunci]`")
-    
     keyword = " ".join(context.args)
     msg = await update.message.reply_text(f"🔍 Mencari preset: **{keyword}**...", parse_mode='Markdown')
-    
     try:
         query = f"capcut template {keyword}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
         r = requests.get(url, headers=headers, timeout=15)
-        
         soup = BeautifulSoup(r.text, 'html.parser')
         links = soup.find_all('a')
-        
         text = f"🎬 **Hasil Pencarian Preset:**\n\n"
         count = 0
         for link in links:
@@ -141,18 +142,12 @@ async def cari_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if href and ('capcut.com' in href):
                 if href.startswith('/url?q='):
                     href = href.split('&')[0].replace('/url?q=', '')
-                
                 if count >= 5: break
                 text += f"🔗 {href}\n\n"
                 count += 1
-                
-        if count == 0:
-            await msg.edit_text("❌ Nggak nemu link preset dari CapCut. Coba kata kunci lain.")
-        else:
-            await msg.edit_text(text, parse_mode='Markdown', disable_web_page_preview=True)
-            
-    except Exception as e:
-        await msg.edit_text(f"❌ Gagal mencari: `{str(e)}`")
+        if count == 0: await msg.edit_text("❌ Nggak nemu link preset dari CapCut.")
+        else: await msg.edit_text(text, parse_mode='Markdown', disable_web_page_preview=True)
+    except Exception as e: await msg.edit_text(f"❌ Gagal mencari: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR SCRAPER & TEMP MAIL
@@ -161,6 +156,7 @@ async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/scrape [url]`")
     url = context.args[0] if context.args[0].startswith("http") else "https://" + context.args[0]
     msg = await update.message.reply_text(f"🕸️ Scraping...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     try:
         r = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         text = re.sub(r'\s+', ' ', BeautifulSoup(r.text, 'html.parser').get_text(separator=' ', strip=True))[:3000]
@@ -172,6 +168,7 @@ async def scrape_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0]
     if not url.startswith("http"): url = "https://" + url
     msg = await update.message.reply_text("🕸️ Mencari gambar...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
     try:
         r = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         images = BeautifulSoup(r.text, 'html.parser').find_all('img')
@@ -226,6 +223,7 @@ async def check_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ═══════════════════════════════════════════════════════════
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🖼️ Memproses (Filter + ASCII)...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
     try:
         img_bytes = await update.message.photo[-1].get_file().download_as_bytearray()
         img_ascii = Image.open(io.BytesIO(img_bytes)).convert('L')
@@ -247,6 +245,7 @@ async def tweet_maker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "|" not in text_input: return await update.message.reply_text("Format: `/tweet [teks] | [nama]`")
     quote, name = text_input.split("|", 1)
     msg = await update.message.reply_text("🐦 Bikin Fake Tweet...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
     try:
         img = Image.new('RGB', (600, 250), color=(21, 32, 43))
         d = ImageDraw.Draw(img)
@@ -338,7 +337,7 @@ async def usn_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = set()
     while len(res) < 15:
         s = random.randint(1, 3)
-        if s = 1: res.add(f"real.{base}")
+        if s == 1: res.add(f"real.{base}")
         elif s == 2: res.add(f"{base}{random.choice(['01','99','666','69'])}")
         else: res.add(f"{base}_id")
     await msg.edit_text("✨ **Username:**\n" + "\n".join([f"{i}. `{r}`" for i, r in enumerate(res, 1)]), parse_mode='Markdown')
@@ -467,7 +466,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v47 berjalan...")
+    print("[@Cancer666] Bot v48 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
