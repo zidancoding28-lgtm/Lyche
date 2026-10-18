@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v48 (Full Professional)
+# bot.py | DanzzBot v49 (Group Manager)
 import os
 import io
 import requests
@@ -32,7 +32,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v48. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v49. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -40,7 +40,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🕸️ Scraper", callback_data='menu_scrape'), InlineKeyboardButton("📧 Temp Mail", callback_data='menu_email')],
         [InlineKeyboardButton("🎨 Gambar & Teks", callback_data='menu_img'), InlineKeyboardButton("🛠️ Dev Tools", callback_data='menu_dev')],
         [InlineKeyboardButton("🎲 Generator", callback_data='menu_gen'), InlineKeyboardButton("🌐 Network", callback_data='menu_net')],
-        [InlineKeyboardButton("🎬 Cari Preset", callback_data='menu_preset')]
+        [InlineKeyboardButton("🎬 Cari Preset", callback_data='menu_preset'), InlineKeyboardButton("👑 Admin Tools", callback_data='menu_admin')]
     ]
     await update.message.reply_text("Pilih tools:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -55,7 +55,32 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_dev': await query.edit_message_text("`/hash` | `/b64` | `/math` | `/caesar` | `/regex` | `/time`")
     elif query.data == 'menu_gen': await query.edit_message_text("`/usn` | `/pass` | `/fake` | `/luhn` | `/cat`")
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
-    elif query.data == 'menu_preset': await query.edit_message_text("Ketik `/caripreset [kata_kunci]`\nContoh: `/caripreset jj viral`")
+    elif query.data == 'menu_preset': await query.edit_message_text("Ketik `/caripreset [kata_kunci]`")
+    elif query.data == 'menu_admin': await query.edit_message_text("👑 **Admin Tools:**\n`/kick` (Reply pesan orang, bot harus Admin)")
+
+# ═══════════════════════════════════════════════════════════
+# FITUR ADMIN (KICK)
+# ═══════════════════════════════════════════════════════════
+async def kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type not in ["group", "supergroup"]:
+        return await update.message.reply_text("❌ Perintah ini cuma bisa dipakai di grup.")
+        
+    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
+    if bot_member.status != "administrator":
+        return await update.message.reply_text("❌ Bot harus jadi Admin grup dulu buat nendang orang.")
+        
+    if not update.message.reply_to_message:
+        return await update.message.reply_text("❌ Reply pesan orang yang mau ditendang, baru ketik /kick.")
+        
+    target_user = update.message.reply_to_message.from_user
+    target_id = target_user.id
+    
+    try:
+        await context.bot.ban_chat_member(update.effective_chat.id, target_id)
+        await context.bot.unban_chat_member(update.effective_chat.id, target_id)
+        await update.message.reply_text(f"👢 {target_user.first_name} udah ditendang dari grup!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Gagal nendang: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR DOWNLOADER, AI & GET IMAGE
@@ -464,9 +489,12 @@ def main():
     app.add_handler(CommandHandler("translate", translate_text))
     app.add_handler(CommandHandler("loc", fake_location))
     
+    # Admin Tools
+    app.add_handler(CommandHandler("kick", kick_member))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v48 berjalan...")
+    print("[@Cancer666] Bot v49 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
