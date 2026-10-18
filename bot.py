@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v38 (Fixed Spotify via YT)
+# bot.py | DanzzBot v42 (Full Combined Build)
 import os
 import io
 import requests
@@ -15,11 +15,10 @@ import urllib.parse
 import urllib3
 from bs4 import BeautifulSoup
 from datetime import datetime
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# Matiin warning SSL biar ga berisik di log
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BOT_TOKEN = "8965097448:AAGM6xwbkjXPRwkb-9jd2fVCdA0p_pOluKM"
@@ -35,7 +34,7 @@ MORSE_DECODE = {v: k for k, v in MORSE_DICT.items()}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v38. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v42. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -49,21 +48,21 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == 'menu_dl': await query.edit_message_text("📥 **Downloader:**\n`/dl [link_video]` (TikTok/IG/YT)\n`/spotify [link_lagu]` (Download MP3)")
+    if query.data == 'menu_dl': await query.edit_message_text("📥 **Downloader:**\n`/dl [link]` (TikTok/IG/YT)\n`/spotify [link_lagu]`")
     elif query.data == 'menu_ai': await query.edit_message_text("Ketik pesan bebas.")
-    elif query.data == 'menu_scrape': await query.edit_message_text("Ketik `/scrape [url]`")
+    elif query.data == 'menu_scrape': await query.edit_message_text("`/scrape [url]` | `/scrapeimg [url]` | `/webp [link_gambar]`")
     elif query.data == 'menu_email': await query.edit_message_text("Ketik `/email` lalu `/inbox`.")
-    elif query.data == 'menu_img': await query.edit_message_text("`/quote` | `/fakewa` | `/struk` | Kirim Foto buat ASCII.")
+    elif query.data == 'menu_img': await query.edit_message_text("`/tweet` | `/quote` | `/struk` | Kirim Foto buat Filter & ASCII.")
     elif query.data == 'menu_dev': await query.edit_message_text("`/hash` | `/b64` | `/math` | `/caesar` | `/regex` | `/time`")
     elif query.data == 'menu_gen': await query.edit_message_text("`/usn` | `/pass` | `/fake` | `/luhn` | `/cat`")
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER
+# FITUR DOWNLOADER & AI
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
-    msg = await update.message.reply_text("⏳ Memproses video...")
+    msg = await update.message.reply_text("⏳ Memproses...")
     ydl_opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
     try:
         os.makedirs('downloads', exist_ok=True)
@@ -73,67 +72,35 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
         os.remove(file_path)
         await msg.delete()
-    except Exception as e: 
-        await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("Format: `/spotify [link_lagu_spotify]`")
-    
+    if not context.args: return await update.message.reply_text("Format: `/spotify [link_lagu]`")
     url = context.args[0]
-    if "spotify.com" not in url:
-        return await update.message.reply_text("❌ Link harus dari Spotify.")
-        
+    if "spotify.com" not in url: return await update.message.reply_text("❌ Link harus Spotify.")
     msg = await update.message.reply_text("🎵 Mencari lagu...")
-    
     try:
-        # 1. Ambil judul lagu via Oembed (Resmi)
         res = requests.get(f"https://open.spotify.com/oembed?url={url}", timeout=10, verify=False).json()
-        title = res.get("title", "Unknown Song")
-        
-        # 2. Cari audio di YouTube
-        await msg.edit_text(f"⬇️ Mengunduh audio: **{title}**...")
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
-            'quiet': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
-        
+        title = res.get("title", "Unknown")
+        await msg.edit_text(f"⬇️ Mengunduh: **{title}**...")
+        ydl_opts = {'format': 'bestaudio/best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True, 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch1:{title} audio", download=True)
             video = info['entries'][0]
             file_path = ydl.prepare_filename(video).replace('.webm', '.mp3').replace('.m4a', '.mp3')
-            
-        # 3. Kirim MP3
-        await update.message.reply_audio(
-            audio=open(file_path, 'rb'), 
-            title=title, 
-            caption=f"✅ **{title}**\n*(Downloaded via DanzzBot)*"
-        )
-        
-        os.remove(file_path)
-        await msg.delete()
-        
-    except Exception as e:
-        await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+        await update.message.reply_audio(audio=open(file_path, 'rb'), title=title, caption=f"✅ **{title}**")
+        os.remove(file_path); await msg.delete()
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
-# ═══════════════════════════════════════════════════════════
-# FITUR AI & SCRAPER
-# ═══════════════════════════════════════════════════════════
 async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args) if context.args else update.message.text
     msg = await update.message.reply_text("🤖 Mikir...")
-    try:
-        res = requests.get(f"https://text.pollinations.ai/{requests.utils.quote(prompt)}", timeout=15)
-        await msg.edit_text(res.text)
-    except: 
-        await msg.edit_text("❌ Error AI.")
+    try: await msg.edit_text(requests.get(f"https://text.pollinations.ai/{requests.utils.quote(prompt)}", timeout=15).text)
+    except: await msg.edit_text("❌ Error AI.")
 
+# ═══════════════════════════════════════════════════════════
+# FITUR SCRAPER & WEBP
+# ═══════════════════════════════════════════════════════════
 async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/scrape [url]`")
     url = context.args[0] if context.args[0].startswith("http") else "https://" + context.args[0]
@@ -142,8 +109,46 @@ async def web_scraper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         text = re.sub(r'\s+', ' ', BeautifulSoup(r.text, 'html.parser').get_text(separator=' ', strip=True))[:3000]
         await msg.edit_text(f"✅ **Scrape:**\n\n`{text}...`", parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal Scrape.")
+    except: await msg.edit_text("❌ Gagal Scrape.")
+
+async def scrape_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Format: `/scrapeimg [url]`")
+    url = context.args[0]
+    if not url.startswith("http"): url = "https://" + url
+    msg = await update.message.reply_text("🕸️ Mencari gambar...")
+    try:
+        r = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        images = BeautifulSoup(r.text, 'html.parser').find_all('img')
+        img_urls = []
+        for img in images:
+            src = img.get('src')
+            if src:
+                if src.startswith('//'): src = 'https:' + src
+                elif src.startswith('/'): 
+                    parsed = urllib.parse.urlparse(url)
+                    src = f"{parsed.scheme}://{parsed.netloc}{src}"
+                elif not src.startswith('http'): continue
+                if src not in img_urls: img_urls.append(src)
+        if not img_urls: return await msg.edit_text("❌ Nggak ada gambar.")
+        await msg.edit_text(f"✅ Ditemukan {len(img_urls)} gambar. Mengirim 5...")
+        for i, img_url in enumerate(img_urls[:5]):
+            try: await update.message.reply_photo(photo=img_url, caption=f"Gambar {i+1}")
+            except: pass
+        await msg.delete()
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+
+async def convert_webp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Format: `/webp [link_gambar]`")
+    url = context.args[0]
+    msg = await update.message.reply_text("🖼️ Konversi ke WebP...")
+    try:
+        r = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+        r.raise_for_status()
+        img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+        buf = io.BytesIO(); img.save(buf, format="WEBP", quality=80); buf.seek(0)
+        await update.message.reply_document(document=buf, filename="image.webp", caption="✅ WebP Berhasil!")
+        await msg.delete()
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR TEMP MAIL
@@ -160,10 +165,8 @@ async def fake_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             token = requests.post("https://api.mail.tm/token", json={"address": email, "password": password}, timeout=10).json().get('token')
             user_sessions[user_id] = {'email': email, 'token': token}
             await msg.edit_text(f"📧 **Email:** `{email}`\n**Pass:** `{password}`\n\n*Ketik `/inbox`.*", parse_mode='Markdown')
-        else: 
-            await msg.edit_text("❌ API Limit.")
-    except: 
-        await msg.edit_text("❌ Error.")
+        else: await msg.edit_text("❌ API Limit.")
+    except: await msg.edit_text("❌ Error.")
 
 async def check_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -176,22 +179,50 @@ async def check_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "📥 **Pesan:**\n\n"
         for m in messages[:3]: text += f"**Dari:** `{m['from']['address']}`\n**Isi:** {m['intro']}\n---\n"
         await msg.edit_text(text, parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal.")
+    except: await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR GAMBAR & TEKS
 # ═══════════════════════════════════════════════════════════
-async def handle_ascii(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("💻 ASCII Art...")
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text("🖼️ Memproses (Filter + ASCII)...")
     try:
-        img = Image.open(io.BytesIO(await update.message.photo[-1].get_file().download_as_bytearray())).convert('L')
-        img = img.resize((50, int((img.height / img.width) * 50 * 0.5)))
-        ascii_str = "".join(["@%#*+=-:. "[p * 10 // 256] for p in img.getdata()])
+        img_bytes = await update.message.photo[-1].get_file().download_as_bytearray()
+        img_ascii = Image.open(io.BytesIO(img_bytes)).convert('L')
+        img_ascii = img_ascii.resize((50, int((img_ascii.height / img_ascii.width) * 50 * 0.5)))
+        ascii_str = "".join(["@%#*+=-:. "[p * 10 // 256] for p in img_ascii.getdata()])
         ascii_img = "\n".join([ascii_str[i:(i+50)] for i in range(0, len(ascii_str), 50)])
-        await msg.edit_text(f"```\n{ascii_img}\n```", parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal.")
+        
+        img_filter = Image.open(io.BytesIO(img_bytes))
+        img_filter = ImageOps.autocontrast(ImageOps.grayscale(img_filter))
+        buf = io.BytesIO(); img_filter.save(buf, format='PNG'); buf.seek(0)
+        
+        await update.message.reply_photo(photo=buf, caption="✅ Filter Estetik (B&W)")
+        await update.message.reply_text(f"```\n{ascii_img}\n```", parse_mode='Markdown')
+        await msg.delete()
+    except: await msg.edit_text("❌ Gagal.")
+
+async def tweet_maker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text_input = " ".join(context.args)
+    if "|" not in text_input: return await update.message.reply_text("Format: `/tweet [teks] | [nama]`")
+    quote, name = text_input.split("|", 1)
+    msg = await update.message.reply_text("🐦 Bikin Fake Tweet...")
+    try:
+        img = Image.new('RGB', (600, 250), color=(21, 32, 43))
+        d = ImageDraw.Draw(img)
+        d.rectangle([20, 20, 80, 80], fill=(100, 100, 100))
+        d.text((90, 30), name.strip(), fill=(255, 255, 255))
+        d.text((90, 50), "@" + name.strip().replace(" ", "").lower(), fill=(150, 150, 150))
+        words = quote.strip().split(); lines, current_line = [], ""
+        for word in words:
+            if len(current_line + word) < 45: current_line += word + " "
+            else: lines.append(current_line); current_line = word + " "
+        lines.append(current_line); y_offset = 100
+        for line in lines: d.text((30, y_offset), line, fill=(255, 255, 255)); y_offset += 30
+        buf = io.BytesIO(); img.save(buf, format='PNG'); buf.seek(0)
+        await update.message.reply_photo(photo=buf, caption="✅ Fake Tweet!")
+        await msg.delete()
+    except: await msg.edit_text("❌ Gagal.")
 
 async def quote_maker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_input = " ".join(context.args)
@@ -200,52 +231,20 @@ async def quote_maker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🖼️ Bikin quote...")
     try:
         img = Image.new('RGB', (600, 300), color=(21, 32, 43))
-        d = ImageDraw.Draw(img)
-        d.text((30, 30), name.strip(), fill=(255, 255, 255))
-        d.text((30, 120), quote.strip()[:50], fill=(255, 255, 255))
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        buf.seek(0)
-        await update.message.reply_photo(photo=buf, caption="✅ Quote.")
-        await msg.delete()
-    except: 
-        await msg.edit_text("❌ Gagal.")
-
-async def fake_wa_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text_input = " ".join(context.args)
-    if text_input.count("|") < 2: return await update.message.reply_text("Format: `/fakewa [nama] | [pesan1] | [pesan2]`")
-    target, msg1, msg2 = text_input.split("|")[:3]
-    msg = await update.message.reply_text("💬 Bikin chat...")
-    try:
-        img = Image.new('RGB', (600, 400), color=(11, 20, 26))
-        d = ImageDraw.Draw(img)
-        d.rectangle([0, 0, 600, 60], fill=(32, 44, 51)); d.text((70, 20), target.strip(), fill=(255, 255, 255))
-        d.rectangle([250, 80, 580, 140], fill=(0, 92, 75)); d.text((270, 100), msg1.strip(), fill=(255, 255, 255))
-        d.rectangle([20, 160, 350, 220], fill=(32, 44, 51)); d.text((40, 180), msg2.strip(), fill=(255, 255, 255))
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        buf.seek(0)
-        await update.message.reply_photo(photo=buf, caption="✅ Chat.")
-        await msg.delete()
-    except: 
-        await msg.edit_text("❌ Gagal.")
+        d = ImageDraw.Draw(img); d.text((30, 30), name.strip(), fill=(255, 255, 255)); d.text((30, 120), quote.strip()[:50], fill=(255, 255, 255))
+        buf = io.BytesIO(); img.save(buf, format='PNG'); buf.seek(0)
+        await update.message.reply_photo(photo=buf, caption="✅ Quote."); await msg.delete()
+    except: await msg.edit_text("❌ Gagal.")
 
 async def fake_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2: return await update.message.reply_text("Format: `/struk [nominal] [nama]`")
     msg = await update.message.reply_text("🧾 Bikin struk...")
     try:
         img = Image.new('RGB', (400, 500), color=(255, 255, 255))
-        d = ImageDraw.Draw(img)
-        d.text((20, 20), "STRUK TRANSFER DANA", fill=(0, 0, 0))
-        d.text((20, 110), f"Penerima: {context.args[1]}", fill=(0, 0, 0))
-        d.text((20, 140), f"Nominal: Rp {context.args[0]}", fill=(0, 0, 0))
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        buf.seek(0)
-        await update.message.reply_photo(photo=buf, caption=f"✅ Struk.")
-        await msg.delete()
-    except: 
-        await msg.edit_text("❌ Gagal.")
+        d = ImageDraw.Draw(img); d.text((20, 20), "STRUK TRANSFER DANA", fill=(0, 0, 0)); d.text((20, 110), f"Penerima: {context.args[1]}", fill=(0, 0, 0)); d.text((20, 140), f"Nominal: Rp {context.args[0]}", fill=(0, 0, 0))
+        buf = io.BytesIO(); img.save(buf, format='PNG'); buf.seek(0)
+        await update.message.reply_photo(photo=buf, caption=f"✅ Struk."); await msg.delete()
+    except: await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR DEV TOOLS & GENERATORS
@@ -253,57 +252,49 @@ async def fake_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def hash_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/hash [teks]`")
     text = " ".join(context.args)
-    await update.message.reply_text(f"🔐 **Hash:**\nMD5: `{hashlib.md5(text.encode()).hexdigest()}`\nSHA256: `{hashlib.sha256(text.encode()).hexdigest()}`", parse_mode='Markdown')
+    await update.message.reply_text(f"🔐 MD5: `{hashlib.md5(text.encode()).hexdigest()}`\nSHA256: `{hashlib.sha256(text.encode()).hexdigest()}`", parse_mode='Markdown')
 
 async def b64_tool(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2: return await update.message.reply_text("Format: `/b64 [encode/decode] [teks]`")
     try:
         res = base64.b64encode(" ".join(context.args[1:]).encode()).decode() if context.args[0] == "encode" else base64.b64decode(" ".join(context.args[1:]).encode()).decode()
-        await update.message.reply_text(f"📦 **Base64:**\n`{res}`", parse_mode='Markdown')
-    except: 
-        await update.message.reply_text("❌ Gagal.")
+        await update.message.reply_text(f"📦 `{res}`", parse_mode='Markdown')
+    except: await update.message.reply_text("❌ Gagal.")
 
 async def math_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/math [soal]`")
     expr = " ".join(context.args).replace("x", "*").replace(":", "/")
     try:
         if not re.match(r"^[0-9+\-*/().\s]+$", expr): raise ValueError
-        await update.message.reply_text(f"🧮 **Hasil:** `{eval(expr)}`", parse_mode='Markdown')
-    except: 
-        await update.message.reply_text("❌ Format salah.")
+        await update.message.reply_text(f"🧮 `{eval(expr)}`", parse_mode='Markdown')
+    except: await update.message.reply_text("❌ Format salah.")
 
 async def caesar_cipher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2: return await update.message.reply_text("Format: `/caesar [shift] [teks]`")
     try:
         shift, text = int(context.args[0]), " ".join(context.args[1:])
         res = "".join([chr((ord(c) - (ord('A') if c.isupper() else ord('a')) + shift) % 26 + (ord('A') if c.isupper() else ord('a'))) if c.isalpha() else c for c in text])
-        await update.message.reply_text(f"🔐 **Caesar:**\n`{res}`", parse_mode='Markdown')
-    except: 
-        await update.message.reply_text("❌ Shift harus angka.")
+        await update.message.reply_text(f"🔐 `{res}`", parse_mode='Markdown')
+    except: await update.message.reply_text("❌ Shift harus angka.")
 
 async def regex_tester(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2: return await update.message.reply_text("Format: `/regex [pola] [teks]`")
     try:
         matches = re.findall(context.args[0], " ".join(context.args[1:]))
         await update.message.reply_text("🔍 **Match:**\n" + "\n".join([f"• `{m}`" for m in matches[:20]]) if matches else "❌ Tidak ada match.", parse_mode='Markdown')
-    except: 
-        await update.message.reply_text("❌ Regex salah.")
+    except: await update.message.reply_text("❌ Regex salah.")
 
 async def timestamp_converter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/time [timestamp/tanggal]`")
     input_str = " ".join(context.args)
     try:
-        if input_str.isdigit(): 
-            await update.message.reply_text(f"⏱️ `{input_str}`\n📅 `{datetime.fromtimestamp(int(input_str)).strftime('%Y-%m-%d %H:%M:%S')}`", parse_mode='Markdown')
-        else: 
-            await update.message.reply_text(f"📅 `{input_str}`\n⏱️ `{int(datetime.strptime(input_str, '%Y-%m-%d %H:%M:%S').timestamp())}`", parse_mode='Markdown')
-    except: 
-        await update.message.reply_text("❌ Format salah.")
+        if input_str.isdigit(): await update.message.reply_text(f"⏱️ `{input_str}`\n📅 `{datetime.fromtimestamp(int(input_str)).strftime('%Y-%m-%d %H:%M:%S')}`", parse_mode='Markdown')
+        else: await update.message.reply_text(f"📅 `{input_str}`\n⏱️ `{int(datetime.strptime(input_str, '%Y-%m-%d %H:%M:%S').timestamp())}`", parse_mode='Markdown')
+    except: await update.message.reply_text("❌ Format salah.")
 
 async def usn_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/usn [kata]`")
-    base = context.args[0].lower()
-    msg = await update.message.reply_text("✨ Generate...")
+    base = context.args[0].lower(); msg = await update.message.reply_text("✨ Generate...")
     res = set()
     while len(res) < 15:
         s = random.randint(1, 3)
@@ -321,25 +312,19 @@ async def fake_identity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = requests.get("https://randomuser.me/api/", timeout=10).json()['results'][0]
         await msg.edit_text(f"👤 **Nama:** `{user['name']['first']} {user['name']['last']}`\n📧 **Email:** `{user['email']}`\n📍 **Kota:** `{user['location']['city']}`", parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal.")
+    except: await msg.edit_text("❌ Gagal.")
 
 async def luhn_checker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/luhn [nomor]`")
     card = context.args[0].replace(" ", "").replace("-", "")
     if not card.isdigit(): return await update.message.reply_text("❌ Angka only.")
     try:
-        digits = [int(d) for d in card]
-        checksum = 0
-        parity = len(digits) % 2
+        digits = [int(d) for d in card]; checksum = 0; parity = len(digits) % 2
         for i, d in enumerate(digits):
-            if i % 2 == parity: 
-                d *= 2
-                if d > 9: d -= 9
+            if i % 2 == parity: d *= 2; d = d - 9 if d > 9 else d
             checksum += d
         await update.message.reply_text(f"💳 **Luhn:**\n`{card}`\nStatus: **{'✅ VALID' if checksum % 10 == 0 else '❌ INVALID'}**", parse_mode='Markdown')
-    except: 
-        await update.message.reply_text("❌ Gagal.")
+    except: await update.message.reply_text("❌ Gagal.")
 
 async def random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🐱 Nyari kucing...")
@@ -347,8 +332,7 @@ async def random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = requests.get("https://api.thecatapi.com/v1/images/search", timeout=10).json()
         await update.message.reply_photo(photo=res[0]['url'], caption="✅ Kucing random.")
         await msg.delete()
-    except: 
-        await msg.edit_text("❌ Gagal.")
+    except: await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
 # FITUR NETWORK TOOLS
@@ -358,22 +342,18 @@ async def ip_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🌍 Cek IP...")
     try:
         res = requests.get(f"http://ip-api.com/json/{context.args[0]}", timeout=10).json()
-        if res['status'] == 'success': 
-            await msg.edit_text(f"📍 `{res['query']}`\nNegara: `{res['country']}`\nISP: `{res['isp']}`", parse_mode='Markdown')
-        else: 
-            await msg.edit_text("❌ IP invalid.")
-    except: 
-        await msg.edit_text("❌ Gagal.")
+        if res['status'] == 'success': await msg.edit_text(f"📍 `{res['query']}`\nNegara: `{res['country']}`\nISP: `{res['isp']}`", parse_mode='Markdown')
+        else: await msg.edit_text("❌ IP invalid.")
+    except: await msg.edit_text("❌ Gagal.")
 
 async def shortlink_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/short [link]`")
     url = context.args[0] if context.args[0].startswith("http") else "https://" + context.args[0]
     msg = await update.message.reply_text("🔗 Shortlink...")
-    try: 
+    try:
         res = requests.get(f"https://is.gd/create.php?format=simple&url={requests.utils.quote(url)}", timeout=10)
         await msg.edit_text(f"✅ `{res.text}`", parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal.")
+    except: await msg.edit_text("❌ Gagal.")
 
 async def weather_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/cuaca [kota]`")
@@ -381,8 +361,7 @@ async def weather_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         res = requests.get(f"https://wttr.in/{requests.utils.quote(' '.join(context.args))}?format=j1", timeout=10).json()
         await msg.edit_text(f"🌤️ **{' '.join(context.args)}**\nSuhu: `{res['current_condition'][0]['temp_C']}°C`", parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal.")
+    except: await msg.edit_text("❌ Gagal.")
 
 async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2: return await update.message.reply_text("Format: `/translate [kode] [teks]`")
@@ -390,20 +369,16 @@ async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         res = requests.get(f"https://api.mymemory.translated.net/get?q={requests.utils.quote(' '.join(context.args[1:]))}&langpair=id|{context.args[0]}", timeout=10).json()
         await msg.edit_text(f"🌐 `{res['responseData']['translatedText']}`", parse_mode='Markdown')
-    except: 
-        await msg.edit_text("❌ Gagal.")
+    except: await msg.edit_text("❌ Gagal.")
 
 async def fake_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/loc [kota]`")
     msg = await update.message.reply_text(f"📍 Nyari lokasi...")
     try:
         res = requests.get(f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(' '.join(context.args))}&format=json&limit=1", headers={'User-Agent': 'Bot'}, timeout=10).json()
-        if res: 
-            await msg.edit_text(f"📍 `{res[0]['lat']}, {res[0]['lon']}`\n[Maps](https://www.google.com/maps?q={res[0]['lat']},{res[0]['lon']})", parse_mode='Markdown')
-        else: 
-            await msg.edit_text("❌ Kota tidak ada.")
-    except: 
-        await msg.edit_text("❌ Gagal.")
+        if res: await msg.edit_text(f"📍 `{res[0]['lat']}, {res[0]['lon']}`\n[Maps](https://www.google.com/maps?q={res[0]['lat']},{res[0]['lon']})", parse_mode='Markdown')
+        else: await msg.edit_text("❌ Kota tidak ada.")
+    except: await msg.edit_text("❌ Gagal.")
 
 # ═══════════════════════════════════════════════════════════
 # MAIN EXECUTION
@@ -419,14 +394,16 @@ def main():
     app.add_handler(CommandHandler("spotify", spotify_download))
     app.add_handler(CommandHandler("ai", ai_chat))
     app.add_handler(CommandHandler("scrape", web_scraper))
+    app.add_handler(CommandHandler("scrapeimg", scrape_images))
+    app.add_handler(CommandHandler("webp", convert_webp))
     
     app.add_handler(CommandHandler("email", fake_email))
     app.add_handler(CommandHandler("inbox", check_inbox))
     
+    app.add_handler(CommandHandler("tweet", tweet_maker))
     app.add_handler(CommandHandler("quote", quote_maker))
-    app.add_handler(CommandHandler("fakewa", fake_wa_chat))
     app.add_handler(CommandHandler("struk", fake_receipt))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_ascii))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
     app.add_handler(CommandHandler("hash", hash_gen))
     app.add_handler(CommandHandler("b64", b64_tool))
@@ -449,7 +426,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v38 berjalan...")
+    print("[@Cancer666] Bot v42 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
