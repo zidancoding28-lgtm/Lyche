@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v51 (Fixed Admin Panel)
+# bot.py | DanzzBot v52 (Full Professional)
 import os
 import io
 import requests
@@ -32,7 +32,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v51. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v52. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -56,71 +56,53 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_gen': await query.edit_message_text("`/usn` | `/pass` | `/fake` | `/luhn` | `/cat`")
     elif query.data == 'menu_net': await query.edit_message_text("`/ip` | `/short` | `/cuaca` | `/translate` | `/loc`")
     elif query.data == 'menu_preset': await query.edit_message_text("Ketik `/caripreset [kata_kunci]`")
-    elif query.data == 'menu_admin': await query.edit_message_text("👑 **Admin Panel:**\n`/kick @username` (Tendang)\n`/mute @username` (Bisin)\n`/unmute @username` (Buka bisin)\n\n*(Bot harus jadi Admin grup)*")
+    elif query.data == 'menu_admin': await query.edit_message_text("👑 **Admin Panel:**\n`/kick @username`\n`/mute @username`\n`/unmute @username`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR ADMIN PANEL (KICK, MUTE, UNMUTE - FIXED)
+# FITUR ADMIN PANEL
 # ═══════════════════════════════════════════════════════════
 async def get_target_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         return update.message.reply_to_message.from_user.id, update.message.reply_to_message.from_user.first_name
-    
     if context.args and context.args[0].isdigit():
         return int(context.args[0]), "Target"
-        
     if context.args and context.args[0].startswith("@"):
         username = context.args[0].replace("@", "")
         async for member in context.bot.get_chat_members(update.effective_chat.id):
             if member.user.username == username:
                 return member.user.id, member.user.first_name
-                
     return None, None
 
 async def kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        return await update.message.reply_text("❌ Cuma bisa di grup.")
-        
+    if update.effective_chat.type not in ["group", "supergroup"]: return await update.message.reply_text("❌ Cuma bisa di grup.")
     target_id, name = await get_target_id(update, context)
-    if not target_id:
-        return await update.message.reply_text("❌ User nggak ketemu. Pastiin dia udah pernah chat di grup ini, atau reply pesannya.")
-        
+    if not target_id: return await update.message.reply_text("❌ User nggak ketemu. Reply pesannya atau masukin ID.")
     try:
         await context.bot.ban_chat_member(update.effective_chat.id, target_id)
         await context.bot.unban_chat_member(update.effective_chat.id, target_id)
         await update.message.reply_text(f"👢 {name} udah ditendang!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Gagal (Bot harus Admin): `{str(e)}`")
+    except Exception as e: await update.message.reply_text(f"❌ Gagal (Bot harus Admin): `{str(e)}`")
 
 async def mute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        return await update.message.reply_text("❌ Cuma bisa di grup.")
-        
+    if update.effective_chat.type not in ["group", "supergroup"]: return await update.message.reply_text("❌ Cuma bisa di grup.")
     target_id, name = await get_target_id(update, context)
-    if not target_id:
-        return await update.message.reply_text("❌ User nggak ketemu.")
-        
+    if not target_id: return await update.message.reply_text("❌ User nggak ketemu.")
     try:
         await context.bot.restrict_chat_member(update.effective_chat.id, target_id, permissions=ChatPermissions(can_send_messages=False))
         await update.message.reply_text(f"🔇 {name} udah dibisin!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Gagal (Bot harus Admin): `{str(e)}`")
+    except Exception as e: await update.message.reply_text(f"❌ Gagal (Bot harus Admin): `{str(e)}`")
 
 async def unmute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        return await update.message.reply_text("❌ Cuma bisa di grup.")
-        
+    if update.effective_chat.type not in ["group", "supergroup"]: return await update.message.reply_text("❌ Cuma bisa di grup.")
     target_id, name = await get_target_id(update, context)
-    if not target_id:
-        return await update.message.reply_text("❌ User nggak ketemu.")
-        
+    if not target_id: return await update.message.reply_text("❌ User nggak ketemu.")
     try:
         await context.bot.restrict_chat_member(update.effective_chat.id, target_id, permissions=ChatPermissions(can_send_messages=True))
         await update.message.reply_text(f"🔊 {name} udah bisa chat lagi!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
+    except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER, AI & GET IMAGE
+# FITUR DOWNLOADER, AI & GET IMAGE (PAKE TYPING ACTION)
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
@@ -133,8 +115,7 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             info = ydl.extract_info(context.args[0], download=True)
             file_path = ydl.prepare_filename(info)
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
-        os.remove(file_path)
-        await msg.delete()
+        os.remove(file_path); await msg.delete()
     except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,8 +183,7 @@ async def cari_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for link in links:
             href = link.get('href')
             if href and ('capcut.com' in href):
-                if href.startswith('/url?q='):
-                    href = href.split('&')[0].replace('/url?q=', '')
+                if href.startswith('/url?q='): href = href.split('&')[0].replace('/url?q=', '')
                 if count >= 5: break
                 text += f"🔗 {href}\n\n"
                 count += 1
@@ -533,7 +513,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v51 berjalan...")
+    print("[@Cancer666] Bot v52 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
