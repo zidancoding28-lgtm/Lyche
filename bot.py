@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v53 (Fixed Downloader)
+# bot.py | DanzzBot v54 (Cancellable Tasks)
 import os
 import io
 import requests
@@ -29,10 +29,25 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 user_sessions = {}
 
 # ═══════════════════════════════════════════════════════════
+# FITUR BATALKAN (CANCEL)
+# ═══════════════════════════════════════════════════════════
+async def cancel_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("❌ Proses dibatalkan!", show_alert=True)
+    try:
+        await query.message.delete()
+        # Hapus file sampah di folder downloads
+        for file in os.listdir('downloads'):
+            if file.endswith('.part') or file.endswith('.ytdl') or file.endswith('.mp4'):
+                try: os.remove(os.path.join('downloads', file))
+                except: pass
+    except: pass
+
+# ═══════════════════════════════════════════════════════════
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v53. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v54. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -76,7 +91,7 @@ async def get_target_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ["group", "supergroup"]: return await update.message.reply_text("❌ Cuma bisa di grup.")
     target_id, name = await get_target_id(update, context)
-    if not target_id: return await update.message.reply_text("❌ User nggak ketemu. Reply pesannya atau masukin ID.")
+    if not target_id: return await update.message.reply_text("❌ User nggak ketemu.")
     try:
         await context.bot.ban_chat_member(update.effective_chat.id, target_id)
         await context.bot.unban_chat_member(update.effective_chat.id, target_id)
@@ -102,49 +117,42 @@ async def unmute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER (FIXED), AI & GET IMAGE
+# FITUR DOWNLOADER (PAKE CANCEL), AI & GET IMAGE
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
-    msg = await update.message.reply_text("⏳ Memproses...")
+    
+    keyboard = [[InlineKeyboardButton("❌ Batalkan", callback_data="cancel")]]
+    msg = await update.message.reply_text("⏳ Memproses... (Klik batal untuk berhenti)", reply_markup=InlineKeyboardMarkup(keyboard))
+    
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_VIDEO)
-    
-    ydl_opts = {
-        'format': 'bestvideo+bestaudio/best', 
-        'outtmpl': 'downloads/%(id)s.%(ext)s', 
-        'quiet': True,
-        'merge_output_format': 'mp4'
-    }
-    
+    ydl_opts = {'format': 'bestvideo+bestaudio/best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True, 'merge_output_format': 'mp4'}
     try:
         os.makedirs('downloads', exist_ok=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(context.args[0], download=True)
             file_path = ydl.prepare_filename(info)
-            
             if not os.path.exists(file_path):
                 base_path = os.path.splitext(file_path)[0]
                 for ext in ['.mp4', '.mkv', '.webm']:
-                    if os.path.exists(base_path + ext):
-                        file_path = base_path + ext
-                        break
-                        
+                    if os.path.exists(base_path + ext): file_path = base_path + ext; break
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
-        os.remove(file_path)
-        await msg.delete()
-    except Exception as e: 
-        await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+        os.remove(file_path); await msg.delete()
+    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/spotify [link_lagu]`")
     url = context.args[0]
     if "spotify.com" not in url: return await update.message.reply_text("❌ Link harus Spotify.")
-    msg = await update.message.reply_text("🎵 Mencari lagu...")
+    
+    keyboard = [[InlineKeyboardButton("❌ Batalkan", callback_data="cancel")]]
+    msg = await update.message.reply_text("🎵 Mencari lagu... (Klik batal untuk berhenti)", reply_markup=InlineKeyboardMarkup(keyboard))
+    
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     try:
         res = requests.get(f"https://open.spotify.com/oembed?url={url}", timeout=10, verify=False).json()
         title = res.get("title", "Unknown")
-        await msg.edit_text(f"⬇️ Mengunduh: **{title}**...")
+        await msg.edit_text(f"⬇️ Mengunduh: **{title}**...", reply_markup=InlineKeyboardMarkup(keyboard))
         ydl_opts = {'format': 'bestaudio/best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True, 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch1:{title} audio", download=True)
@@ -487,6 +495,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(menu_callback))
+    app.add_handler(CallbackQueryHandler(cancel_task, pattern="^cancel$"))
     
     app.add_handler(CommandHandler("dl", download_media))
     app.add_handler(CommandHandler("spotify", spotify_download))
@@ -530,7 +539,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v53 berjalan...")
+    print("[@Cancer666] Bot v54 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
