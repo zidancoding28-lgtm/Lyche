@@ -1,4 +1,4 @@
-# bot.py | DanzzBot v52 (Full Professional)
+# bot.py | DanzzBot v53 (Fixed Downloader)
 import os
 import io
 import requests
@@ -32,7 +32,7 @@ user_sessions = {}
 # CORE & MENU
 # ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Gue DanzzBot v52. Ketik /menu.")
+    await update.message.reply_text("Halo! Gue DanzzBot v53. Ketik /menu.")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -102,21 +102,38 @@ async def unmute_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Gagal: `{str(e)}`")
 
 # ═══════════════════════════════════════════════════════════
-# FITUR DOWNLOADER, AI & GET IMAGE (PAKE TYPING ACTION)
+# FITUR DOWNLOADER (FIXED), AI & GET IMAGE
 # ═══════════════════════════════════════════════════════════
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/dl [link]`")
     msg = await update.message.reply_text("⏳ Memproses...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_VIDEO)
-    ydl_opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
+    
+    ydl_opts = {
+        'format': 'bestvideo+bestaudio/best', 
+        'outtmpl': 'downloads/%(id)s.%(ext)s', 
+        'quiet': True,
+        'merge_output_format': 'mp4'
+    }
+    
     try:
         os.makedirs('downloads', exist_ok=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(context.args[0], download=True)
             file_path = ydl.prepare_filename(info)
+            
+            if not os.path.exists(file_path):
+                base_path = os.path.splitext(file_path)[0]
+                for ext in ['.mp4', '.mkv', '.webm']:
+                    if os.path.exists(base_path + ext):
+                        file_path = base_path + ext
+                        break
+                        
         await update.message.reply_video(video=open(file_path, 'rb'), caption=f"✅ {info.get('title', 'Video')}")
-        os.remove(file_path); await msg.delete()
-    except Exception as e: await msg.edit_text(f"❌ Gagal: `{str(e)}`")
+        os.remove(file_path)
+        await msg.delete()
+    except Exception as e: 
+        await msg.edit_text(f"❌ Gagal: `{str(e)}`")
 
 async def spotify_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("Format: `/spotify [link_lagu]`")
@@ -513,7 +530,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
 
-    print("[@Cancer666] Bot v52 berjalan...")
+    print("[@Cancer666] Bot v53 berjalan...")
     app.run_polling()
 
 if __name__ == '__main__':
