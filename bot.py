@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V30c - Battery Fix via dumpsys)
+# bot.py — Bot Telegram Ultimate (V30d - Hardware Fix)
 import os
 import re
 import shutil
@@ -10,6 +10,7 @@ import time
 import threading
 import subprocess
 import json
+import socket
 import telebot
 import yt_dlp
 import requests
@@ -41,38 +42,59 @@ conn.commit()
 # --- NATIVE SYSTEM INFO FUNCTIONS ---
 def get_battery_info():
     try:
-        # Trik bypass permission: Baca lewat dumpsys battery
-        out = subprocess.check_output(['dumpsys', 'battery'], text=True)
-        level = re.search(r'level:\s*(\d+)', out)
-        temp = re.search(r'temperature:\s*(\d+)', out)
-        status = re.search(r'status:\s*(\d+)', out)
-        
-        if not level: return "❌ Gagal baca level baterai."
-        
-        status_map = {"1": "Unknown", "2": "Charging", "3": "Discharging", "4": "Not Charging", "5": "Full"}
-        st = status_map.get(status.group(1) if status else "", "Unknown")
-        tp = f"{int(temp.group(1))/10.0}°C" if temp else "N/A"
-        
-        return f"🔋 **Baterai:** {level.group(1)}%\nStatus: {st}\nSuhu: {tp}"
+        # Trik: Baca dari virtual filesystem Android yang biasanya gak di-lock
+        paths = [
+            '/sys/class/power_supply/battery/capacity',
+            '/sys/class/power_supply/bms/capacity',
+            '/sys/class/power_supply/BAT0/capacity'
+        ]
+        capacity = None
+        for p in paths:
+            if os.path.exists(p):
+                with open(p, 'r') as f:
+                    capacity = f.read().strip()
+                break
+                
+        if not capacity:
+            return "❌ Gagal baca baterai (file virtual sistem gak nemu)."
+
+        status_paths = [
+            '/sys/class/power_supply/battery/status',
+            '/sys/class/power_supply/bms/status',
+            '/sys/class/power_supply/BAT0/status'
+        ]
+        status = "Unknown"
+        for p in status_paths:
+            if os.path.exists(p):
+                with open(p, 'r') as f:
+                    status = f.read().strip()
+                break
+
+        temp_paths = [
+            '/sys/class/power_supply/battery/temp',
+            '/sys/class/power_supply/bms/temp'
+        ]
+        temp = "N/A"
+        for p in temp_paths:
+            if os.path.exists(p):
+                with open(p, 'r') as f:
+                    temp = f"{int(f.read().strip())/10.0}°C"
+                break
+
+        return f"🔋 **Baterai:** {capacity}%\nStatus: {status}\nSuhu: {temp}"
     except Exception as e:
         return f"❌ Gagal baca baterai: {e}"
 
 def get_local_ip():
     try:
-        out = subprocess.check_output(['ip', 'addr', 'show', 'wlan0'], text=True)
-        match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', out)
-        if match:
-            return f"🌐 **IP Lokal (WiFi):** `{match.group(1)}`"
-        
-        # Fallback ke data seluler
-        out2 = subprocess.check_output(['ip', 'addr', 'show', 'rmnet_data0'], text=True)
-        match2 = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', out2)
-        if match2:
-            return f"🌐 **IP Lokal (Data):** `{match2.group(1)}`"
-            
-        return "IP tidak ditemukan. Pastiin jaringan nyala."
+        # Trik Python murni: Bikin koneksi dummy buat nanya IP lokal ke OS
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return f"🌐 **IP Lokal:** `{ip}`"
     except:
-        return "❌ Gagal baca IP (Interface tidak dikenal)."
+        return "❌ Gagal baca IP. Pastiin jaringan nyala."
 
 # --- QUEUE SYSTEM ---
 download_queue = []
@@ -535,7 +557,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V30c - Battery Fix)...")
+    print("Bot running (V30d - Hardware Fix)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
