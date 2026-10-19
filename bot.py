@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V17 - DNS Bypass)
+# bot.py — Bot Telegram Ultimate (V18 - Pure Local DNS Bypass)
 import os
 import re
 import shutil
@@ -53,15 +53,13 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "no_warnings": True,
         "max_filesize": MAX_FILESIZE_MB * 1024 * 1024,
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
-        "socket_timeout": 30, 
-        "retries": 10,
-        # --- TRIK DNS ---
-        "doh_url": "https://1dot1dot1dot1.cloudflare-dns.com/dns-query",
-        "source_address": "0.0.0.0",
+        "socket_timeout": 15, 
+        "retries": 5,
+        # --- MURNI PAKE DNS HP & FORCE IPV4 ---
+        "source_address": "0.0.0.0", # Paksa IPv4
         "extractor_args": {
             "youtube": {
-                # Pake client bawaan browser biar gak gampang di-blok
-                "player_client": ["web", "android", "ios"]
+                "player_client": ["ios", "android", "web"] # Client standar
             }
         }
     }
@@ -109,7 +107,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
 def _process_download(message, kind: str, url: str, status_msg_id: int):
     path = _sync_download(url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Coba matikan WiFi, pakai kuota data, atau tunggu sinyal stabil.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Jaringan operator lu ngeblokir. Ganti ke WiFi atau nyalain WARP.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -294,7 +292,7 @@ def cmd_quote(message):
     else: bot.reply_to(message, "Belum ada quote.")
 
 if __name__ == "__main__":
-    print("Bot running (DNS Bypass)...")
+    print("Bot running (Pure Local DNS)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
