@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V5 - All UI)
+# bot.py — Bot Telegram Full Fitur (V6 - All UI + Anti-Drop)
 import os
 import re
 import shutil
@@ -13,6 +13,7 @@ from pathlib import Path
 import yt_dlp
 from telebot import types
 
+# --- TOKEN LANGSUNG DI SINI ---
 BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "./downloads"))
 MAX_FILESIZE_MB = int(os.getenv("MAX_FILESIZE_MB", "50"))
@@ -92,7 +93,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
 
 def _process_download(message, kind: str, url: str, status_msg_id: int):
     path = _sync_download(url, kind, message.chat.id, status_msg_id)
-    if path is None: return bot.edit_message_text("Gagal download.", message.chat.id, status_msg_id)
+    if path is None: return bot.edit_message_text("Gagal download. Cek link.", message.chat.id, status_msg_id)
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
     try:
@@ -263,5 +264,12 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running...")
-    bot.infinity_polling()
+    print("Bot running (Anti-Drop)...")
+    while True:
+        try:
+            # none_stop=True & timeout disetel biar koneksi lebih tahan banting
+            bot.infinity_polling(timeout=15, long_polling_timeout=10, none_stop=True)
+        except Exception as e:
+            print(f"Koneksi terputus: {e}")
+            print("Nyoba nyambung lagi dalam 5 detik...")
+            time.sleep(5)
