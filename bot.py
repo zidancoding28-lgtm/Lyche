@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V21 - Spotify Search Fix)
+# bot.py — Bot Telegram Ultimate (V23 - Final Spotify Fix)
 import os
 import re
 import shutil
@@ -103,7 +103,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
-# --- SPOTIFY BRIDGE (FIXED SEARCH) ---
+# --- SPOTIFY BRIDGE (FINAL FIX) ---
 def resolve_spotify(url, chat_id, status_msg_id):
     try:
         bot.edit_message_text("Membaca metadata Spotify...", chat_id, status_msg_id)
@@ -112,30 +112,29 @@ def resolve_spotify(url, chat_id, status_msg_id):
             title = info.get("title", "")
             artist = info.get("artist") or info.get("uploader") or ""
             
-            # Bersihin tanda kutip atau karakter aneh dari judul
             safe_title = re.sub(r'[^\w\s-]', '', title)
             safe_artist = re.sub(r'[^\w\s-]', '', artist)
             
-            # Query pencarian
-            search_q = f"ytsearch1:{safe_artist} {safe_title} audio"
+            query = f"ytsearch1:{safe_artist} {safe_title} audio"
             bot.edit_message_text(f"Mencari di YouTube: {safe_artist} - {safe_title}...", chat_id, status_msg_id)
             
+            # Paksa client web murni biar YouTube gak ngeblokir pencarian
             search_opts = {
-                "quiet": True, 
-                "extract_flat": True,
-                "extractor_args": {"youtube": {"player_client": ["ios", "web"]}}
+                "quiet": True,
+                "extractor_args": {"youtube": {"player_client": ["web"]}}
             }
+            
             with yt_dlp.YoutubeDL(search_opts) as search_ydl:
                 try:
-                    res = search_ydl.extract_info(search_q, download=False)
+                    res = search_ydl.extract_info(query, download=False)
                     if res and 'entries' in res and len(res['entries']) > 0:
                         return res['entries'][0]['webpage_url']
                 except Exception as e:
-                    print(f"Pencarian 1 gagal: {e}")
+                    print(f"Search 1 error: {e}")
                 
                 # Fallback: Cari pake judul aja
                 bot.edit_message_text(f"Mencari alternatif: {safe_title}...", chat_id, status_msg_id)
-                res2 = search_ydl.extract_info(f"ytsearch1:{safe_title} audio", download=False)
+                res2 = search_ydl.extract_info(f"ytsearch1:{safe_title}", download=False)
                 if res2 and 'entries' in res2 and len(res2['entries']) > 0:
                     return res2['entries'][0]['webpage_url']
                     
@@ -148,13 +147,13 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
     if "open.spotify.com" in url:
         yt_url = resolve_spotify(url, message.chat.id, status_msg_id)
         if not yt_url:
-            return bot.edit_message_text("Gagal nemu lagu Spotify di YouTube. Coba cari manual di YouTube.", message.chat.id, status_msg_id)
+            return bot.edit_message_text("Gagal nemu lagu di YouTube. Jaringan diblokir, atau judul lagu gak ada di YT.", message.chat.id, status_msg_id)
         final_url = yt_url
         kind = "audio"
 
     path = _sync_download(final_url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Jaringan operator lu ngeblokir. Ganti ke WiFi atau nyalain WARP.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Operator lu ngeblokir. Nyalain WARP/1.1.1.1.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -202,7 +201,7 @@ def callback_menu(call):
     if cmd in ["video", "audio", "photo"]:
         bot.send_message(call.message.chat.id, f"Tempel link {cmd} sekarang:", reply_markup=types.ForceReply(selective=True))
     elif cmd == "spotify":
-        bot.send_message(call.message.chat.id, "Tempel link Spotify (Track/Album) sekarang:", reply_markup=types.ForceReply(selective=True))
+        bot.send_message(call.message.chat.id, "Tempel link Spotify (Track/Album) sekarang:\n\n*(Catatan: Bot akan mencari lagu ini di YouTube karena Spotify diproteksi DRM)*", parse_mode="Markdown", reply_markup=types.ForceReply(selective=True))
     elif cmd == "notes":
         cursor.execute("SELECT id, text FROM notes WHERE chat_id=?", (call.message.chat.id,))
         rows = cursor.fetchall()
@@ -354,7 +353,7 @@ def cmd_quote(message):
     else: bot.reply_to(message, "Belum ada quote.")
 
 if __name__ == "__main__":
-    print("Bot running (Spotify Fix)...")
+    print("Bot running (Final Spotify)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
