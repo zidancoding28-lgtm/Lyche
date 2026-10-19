@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V10 - YouTube Focus)
+# bot.py — Bot Telegram Full Fitur (V11 - YouTube Fix)
 import os
 import re
 import shutil
@@ -53,7 +53,14 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "no_warnings": True,
         "max_filesize": MAX_FILESIZE_MB * 1024 * 1024,
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
-        "http_headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        "socket_timeout": 30, # Naikin timeout biar gak gampang RST
+        "http_headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        # TRIK BYPASS: Paksa yt-dlp pakai client iOS/Android biar gak dianggap bot
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "android", "web"]
+            }
+        }
     }
     if kind == "video": base.update(format="bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", merge_output_format="mp4")
     elif kind == "audio": base.update(format="bestaudio/best", postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}])
@@ -99,7 +106,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
 def _process_download(message, kind: str, url: str, status_msg_id: int):
     path = _sync_download(url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Cek link atau ukuran file.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. YouTube ngeblokir IP lu atau link gak valid.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -266,7 +273,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (YouTube Focus)...")
+    print("Bot running (YouTube Fix)...")
     while True:
         try:
             bot.infinity_polling(timeout=15, long_polling_timeout=10, none_stop=True)
