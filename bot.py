@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V16 - All Features + DoH + Spotify)
+# bot.py — Bot Telegram Ultimate (V17 - DNS Bypass)
 import os
 import re
 import shutil
@@ -54,12 +54,14 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "max_filesize": MAX_FILESIZE_MB * 1024 * 1024,
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
         "socket_timeout": 30, 
-        "retries": 5, 
+        "retries": 10,
+        # --- TRIK DNS ---
         "doh_url": "https://1dot1dot1dot1.cloudflare-dns.com/dns-query",
         "source_address": "0.0.0.0",
         "extractor_args": {
             "youtube": {
-                "player_client": ["android_vr", "ios", "mweb"]
+                # Pake client bawaan browser biar gak gampang di-blok
+                "player_client": ["web", "android", "ios"]
             }
         }
     }
@@ -104,36 +106,10 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
-# --- SPOTIFY BRIDGE ---
-def resolve_spotify(url, chat_id, status_msg_id):
-    try:
-        bot.edit_message_text("Baca metadata Spotify...", chat_id, status_msg_id)
-        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get("title", "")
-            artist = info.get("artist") or info.get("uploader") or ""
-            search_q = f"ytsearch1:{artist} - {title} audio"
-            bot.edit_message_text(f"Cari lagu di YouTube: {artist} - {title}...", chat_id, status_msg_id)
-            with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as search_ydl:
-                res = search_ydl.extract_info(search_q, download=False)
-                if res and 'entries' in res and len(res['entries']) > 0:
-                    return res['entries'][0]['webpage_url']
-    except Exception as e:
-        print(f"Spotify bridge error: {e}")
-    return None
-
 def _process_download(message, kind: str, url: str, status_msg_id: int):
-    final_url = url
-    if "open.spotify.com" in url:
-        yt_url = resolve_spotify(url, message.chat.id, status_msg_id)
-        if not yt_url:
-            return bot.edit_message_text("Gagal nemu lagu Spotify di YouTube.", message.chat.id, status_msg_id)
-        final_url = yt_url
-        kind = "audio"
-
-    path = _sync_download(final_url, kind, message.chat.id, status_msg_id)
+    path = _sync_download(url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Server nolak koneksi. Nyalain WARP/1.1.1.1 di HP lu, terus coba lagi.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Coba matikan WiFi, pakai kuota data, atau tunggu sinyal stabil.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -318,7 +294,7 @@ def cmd_quote(message):
     else: bot.reply_to(message, "Belum ada quote.")
 
 if __name__ == "__main__":
-    print("Bot running (Ultimate V16)...")
+    print("Bot running (DNS Bypass)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
