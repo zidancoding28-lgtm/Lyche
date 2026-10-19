@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V13 - CDN Bypass)
+# bot.py — Bot Telegram Full Fitur (V15 - DoH 1.1.1.1 Spesifik)
 import os
 import re
 import shutil
@@ -55,12 +55,12 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
         "socket_timeout": 30, 
         "retries": 5, 
-        # TRIK UTAMA: Paksa pakai jaringan IPv4 & pake client web_safari / mweb biar CDN gak ngeblokir
-        "source_address": "0.0.0.0", 
+        # --- TRIK DNS OVER HTTPS (DoH) 1.1.1.1 ---
+        "doh_url": "https://1dot1dot1dot1.cloudflare-dns.com/dns-query", 
+        "source_address": "0.0.0.0",
         "extractor_args": {
             "youtube": {
-                "player_client": ["android_vr", "ios", "mweb"],
-                "player_skip": ["webpage", "configs"]
+                "player_client": ["android_vr", "ios", "mweb"]
             }
         }
     }
@@ -108,7 +108,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
 def _process_download(message, kind: str, url: str, status_msg_id: int):
     path = _sync_download(url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Server Google ngeblokir IP HP lu. Coba pakai VPN atau ganti ke WiFi.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Server Google ngeblokir IP. Nyalain WARP/1.1.1.1 di HP lu, terus coba lagi.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -272,10 +272,10 @@ def cmd_todo(message):
     text = message.text.replace('/todo ', '')
     if not text: return bot.reply_to(message, "Format: /todo <teks>")
     cursor.execute("INSERT INTO todos (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
-    bot.reply_to(message, "✅ To-do ditambahkan.")
+    bot.reply_to(message, "✅ Todo ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (CDN Bypass)...")
+    print("Bot running (DoH 1.1.1.1)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
