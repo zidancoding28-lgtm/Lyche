@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V11 - YouTube Fix)
+# bot.py — Bot Telegram Full Fitur (V12 - Anti-Mokat)
 import os
 import re
 import shutil
@@ -53,9 +53,11 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "no_warnings": True,
         "max_filesize": MAX_FILESIZE_MB * 1024 * 1024,
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
-        "socket_timeout": 30, # Naikin timeout biar gak gampang RST
+        "socket_timeout": 30, 
+        "retries": 10, # Nyoba ulang kalau koneksi RST
+        "fragment_retries": 10,
         "http_headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-        # TRIK BYPASS: Paksa yt-dlp pakai client iOS/Android biar gak dianggap bot
+        # Trik bypass YouTube
         "extractor_args": {
             "youtube": {
                 "player_client": ["ios", "android", "web"]
@@ -270,13 +272,13 @@ def cmd_todo(message):
     text = message.text.replace('/todo ', '')
     if not text: return bot.reply_to(message, "Format: /todo <teks>")
     cursor.execute("INSERT INTO todos (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
-    bot.reply_to(message, "✅ To-do ditambahkan.")
+    bot.reply_to(message, "✅ Todo ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (YouTube Fix)...")
+    print("Bot running (Anti-Mokat)...")
     while True:
         try:
-            bot.infinity_polling(timeout=15, long_polling_timeout=10, none_stop=True)
+            bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
         except Exception as e:
             print(f"Koneksi terputus: {e}")
             print("Nyoba nyambung lagi dalam 5 detik...")
