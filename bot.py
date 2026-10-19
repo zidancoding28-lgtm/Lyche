@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V27 - TikTok Fix)
+# bot.py — Bot Telegram Ultimate (V28 - Clear System)
 import os
 import re
 import shutil
@@ -77,7 +77,6 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "socket_timeout": 15, 
         "retries": 5,
         "source_address": "0.0.0.0"
-        # extractor_args dibuang biar yt-dlp otomatis milih client per platform
     }
     if kind == "video": base.update(format="bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", merge_output_format="mp4")
     elif kind == "audio": base.update(format="bestaudio/best", postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}])
@@ -223,6 +222,8 @@ def callback_menu(call):
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton("🎲 Roll Dadu", callback_data="tool_roll"), types.InlineKeyboardButton("🎯 Pick", callback_data="tool_pick"))
         markup.row(types.InlineKeyboardButton("🔑 Genpass", callback_data="tool_genpass"), types.InlineKeyboardButton("🕒 Time", callback_data="tool_time"))
+        # Tombol Clear ditambahin di sini
+        markup.row(types.InlineKeyboardButton("🗑 Bersihkan Cache", callback_data="tool_clear"))
         markup.row(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back"))
         bot.edit_message_text("⚙️ **Menu Alat:**", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
     elif cmd == "back":
@@ -232,10 +233,26 @@ def callback_menu(call):
 def callback_tool(call):
     tool = call.data.replace("tool_", "")
     bot.answer_callback_query(call.id)
+    
     if tool == "time": bot.send_message(call.message.chat.id, f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     elif tool == "roll": bot.send_message(call.message.chat.id, "🎲 Ketik: `/roll 2d6`", parse_mode="Markdown")
     elif tool == "pick": bot.send_message(call.message.chat.id, "🎯 Ketik: `/pick opsi1 opsi2`", parse_mode="Markdown")
     elif tool == "genpass": bot.send_message(call.message.chat.id, "🔑 Ketik: `/genpass 16`", parse_mode="Markdown")
+    elif tool == "clear":
+        # Logika Bersihin File Sampah di Folder downloads
+        deleted_files = 0
+        for f in DOWNLOAD_DIR.glob('*'):
+            if f.is_file():
+                try:
+                    f.unlink()
+                    deleted_files += 1
+                except: pass
+        
+        # Bersihin history milik user ini
+        cursor.execute("DELETE FROM history WHERE chat_id=?", (call.message.chat.id,))
+        conn.commit()
+        
+        bot.edit_message_text(f"🗑 **Cache dibersihkan!**\n- {deleted_files} file sampah dihapus.\n- Riwayat download dikosongkan.", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back")))
 
 # --- TEXT HANDLERS ---
 @bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith('/'))
@@ -368,6 +385,20 @@ def cmd_watch(message):
     threading.Thread(target=scrape_watch, args=(message.chat.id, url, watch_id), daemon=True).start()
     bot.reply_to(message, "✅ Memantau halaman. Akan diberitahu jika ada perubahan.")
 
+@bot.message_handler(commands=['clear'])
+def cmd_clear(message):
+    deleted_files = 0
+    for f in DOWNLOAD_DIR.glob('*'):
+        if f.is_file():
+            try:
+                f.unlink()
+                deleted_files += 1
+            except: pass
+            
+    cursor.execute("DELETE FROM history WHERE chat_id=?", (message.chat.id,))
+    conn.commit()
+    bot.reply_to(message, f"🗑 **Cache dibersihkan!**\n- {deleted_files} file sampah dihapus.\n- Riwayat download dikosongkan.", parse_mode="Markdown")
+
 @bot.message_handler(commands=['lock'])
 def cmd_lock(message):
     bot.reply_to(message, "Fitur lock bot belum diimplementasi penuh.")
@@ -445,7 +476,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V27 - TikTok Fix)...")
+    print("Bot running (V28 - Clear System)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
