@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V15 - DoH 1.1.1.1 Spesifik)
+# bot.py — Bot Telegram Ultimate (V16 - All Features + DoH + Spotify)
 import os
 import re
 import shutil
@@ -55,8 +55,7 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
         "socket_timeout": 30, 
         "retries": 5, 
-        # --- TRIK DNS OVER HTTPS (DoH) 1.1.1.1 ---
-        "doh_url": "https://1dot1dot1dot1.cloudflare-dns.com/dns-query", 
+        "doh_url": "https://1dot1dot1dot1.cloudflare-dns.com/dns-query",
         "source_address": "0.0.0.0",
         "extractor_args": {
             "youtube": {
@@ -105,10 +104,36 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
+# --- SPOTIFY BRIDGE ---
+def resolve_spotify(url, chat_id, status_msg_id):
+    try:
+        bot.edit_message_text("Baca metadata Spotify...", chat_id, status_msg_id)
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = info.get("title", "")
+            artist = info.get("artist") or info.get("uploader") or ""
+            search_q = f"ytsearch1:{artist} - {title} audio"
+            bot.edit_message_text(f"Cari lagu di YouTube: {artist} - {title}...", chat_id, status_msg_id)
+            with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as search_ydl:
+                res = search_ydl.extract_info(search_q, download=False)
+                if res and 'entries' in res and len(res['entries']) > 0:
+                    return res['entries'][0]['webpage_url']
+    except Exception as e:
+        print(f"Spotify bridge error: {e}")
+    return None
+
 def _process_download(message, kind: str, url: str, status_msg_id: int):
-    path = _sync_download(url, kind, message.chat.id, status_msg_id)
+    final_url = url
+    if "open.spotify.com" in url:
+        yt_url = resolve_spotify(url, message.chat.id, status_msg_id)
+        if not yt_url:
+            return bot.edit_message_text("Gagal nemu lagu Spotify di YouTube.", message.chat.id, status_msg_id)
+        final_url = yt_url
+        kind = "audio"
+
+    path = _sync_download(final_url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Server Google ngeblokir IP. Nyalain WARP/1.1.1.1 di HP lu, terus coba lagi.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Server nolak koneksi. Nyalain WARP/1.1.1.1 di HP lu, terus coba lagi.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -272,10 +297,28 @@ def cmd_todo(message):
     text = message.text.replace('/todo ', '')
     if not text: return bot.reply_to(message, "Format: /todo <teks>")
     cursor.execute("INSERT INTO todos (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
-    bot.reply_to(message, "✅ Todo ditambahkan.")
+    bot.reply_to(message, "✅ To-do ditambahkan.")
+
+@bot.message_handler(commands=['history'])
+def cmd_history(message):
+    cursor.execute("SELECT url FROM history WHERE chat_id=? ORDER BY id DESC LIMIT 5", (message.chat.id,))
+    rows = cursor.fetchall()
+    text = "🕒 **History:**\n\n" + "\n".join([f"- {r[0]}" for r in rows]) if rows else "Belum ada history."
+    bot.reply_to(message, text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['quote'])
+def cmd_quote(message):
+    text = message.text.replace('/quote ', '')
+    if text and text != '/quote':
+        cursor.execute("INSERT INTO quotes (text) VALUES (?)", (text,)); conn.commit()
+        return bot.reply_to(message, "✅ Quote disimpan.")
+    cursor.execute("SELECT text FROM quotes ORDER BY RANDOM() LIMIT 1")
+    res = cursor.fetchone()
+    if res: bot.reply_to(message, f"💬 \"{res[0]}\"")
+    else: bot.reply_to(message, "Belum ada quote.")
 
 if __name__ == "__main__":
-    print("Bot running (DoH 1.1.1.1)...")
+    print("Bot running (Ultimate V16)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
