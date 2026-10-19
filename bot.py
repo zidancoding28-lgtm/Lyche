@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V28 - Clear System)
+# bot.py — Bot Telegram Ultimate (V29 - Auto-Rename)
 import os
 import re
 import shutil
@@ -90,39 +90,66 @@ def _pick_thumb(info: dict) -> str | None:
     imgs.sort(key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
     return imgs[-1]["url"]
 
-def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | None:
+def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> dict | None:
+    """Mengembalikan dict berisi path file dan metadata (judul, artis)."""
     try:
         with yt_dlp.YoutubeDL(_ydl_opts(kind, chat_id, msg_id)) as ydl:
             info = ydl.extract_info(url, download=(kind != "photo"))
             if info is None: return None
+            
+            # --- AUTO RENAME LOGIC ---
+            raw_title = info.get("title", "Unknown")
+            artist = info.get("artist") or info.get("uploader") or info.get("channel") or ""
+            
+            if artist and artist.lower() not in raw_title.lower():
+                clean_name = f"{artist} - {raw_title}"
+            else:
+                clean_name = raw_title
+                
+            # Bersihin karakter aneh buat nama file
+            clean_name = re.sub(r'[\\/*?:"<>|]', "", clean_name).strip()
+            clean_name = clean_name[:100] # Batasin panjang nama file
+
             if kind == "photo":
                 thumb_url = _pick_thumb(info)
                 if not thumb_url: return None
-                out = DOWNLOAD_DIR / f"{info.get('id', 'img')}.jpg"
+                out = DOWNLOAD_DIR / f"{clean_name}.jpg"
                 with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as d:
                     d.download([thumb_url])
                     for cand in DOWNLOAD_DIR.glob(f"{info.get('id', '')}*"):
                         if cand.is_file() and cand != out:
                             shutil.move(str(cand), str(out))
                             break
-                return out if out.exists() else None
+                return {"path": out, "title": clean_name} if out.exists() else None
+
             path = Path(ydl.prepare_filename(info))
             if not path.exists():
                 stem = path.with_suffix("")
                 exts = (".mp4", ".mkv", ".webm") if kind == "video" else (".mp3", ".m4a", ".opus")
                 for ext in exts:
                     cand = stem.with_suffix(ext)
-                    if cand.exists(): return cand
-                return None
-            return path
+                    if cand.exists(): path = cand; break
+                else: return None
+            
+            # Rename file fisiknya
+            new_path = DOWNLOAD_DIR / f"{clean_name}{path.suffix}"
+            try:
+                path.rename(new_path)
+                path = new_path
+            except: pass # Kalau gagal rename (file exists), biarin pake nama lama
+            
+            return {"path": path, "title": clean_name}
     except Exception as e:
         print(f"download error ({kind}): {e}")
         return None
 
 def _process_download(message, kind: str, url: str, status_msg_id: int):
-    path = _sync_download(url, kind, message.chat.id, status_msg_id)
-    if path is None: 
+    res = _sync_download(url, kind, message.chat.id, status_msg_id)
+    if res is None: 
         return bot.edit_message_text("Gagal download. Jaringan diblokir / link invalid.", message.chat.id, status_msg_id)
+    
+    path = res["path"]
+    title = res["title"]
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -130,10 +157,10 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
     try:
         with open(path, "rb") as f:
             if kind == "video":
-                if size_mb > 50: bot.send_document(message.chat.id, f, caption=path.stem, timeout=120)
-                else: bot.send_video(message.chat.id, f, caption=path.stem, supports_streaming=True, timeout=120)
-            elif kind == "audio": bot.send_audio(message.chat.id, f, title=path.stem, timeout=120)
-            else: bot.send_photo(message.chat.id, f, caption=path.stem, timeout=120)
+                if size_mb > 50: bot.send_document(message.chat.id, f, caption=title, timeout=120)
+                else: bot.send_video(message.chat.id, f, caption=title, supports_streaming=True, timeout=120)
+            elif kind == "audio": bot.send_audio(message.chat.id, f, title=title, timeout=120)
+            else: bot.send_photo(message.chat.id, f, caption=title, timeout=120)
         bot.delete_message(message.chat.id, status_msg_id)
     except Exception as e:
         bot.edit_message_text(f"Upload gagal: {e}", message.chat.id, status_msg_id)
@@ -222,7 +249,6 @@ def callback_menu(call):
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton("🎲 Roll Dadu", callback_data="tool_roll"), types.InlineKeyboardButton("🎯 Pick", callback_data="tool_pick"))
         markup.row(types.InlineKeyboardButton("🔑 Genpass", callback_data="tool_genpass"), types.InlineKeyboardButton("🕒 Time", callback_data="tool_time"))
-        # Tombol Clear ditambahin di sini
         markup.row(types.InlineKeyboardButton("🗑 Bersihkan Cache", callback_data="tool_clear"))
         markup.row(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back"))
         bot.edit_message_text("⚙️ **Menu Alat:**", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
@@ -239,7 +265,6 @@ def callback_tool(call):
     elif tool == "pick": bot.send_message(call.message.chat.id, "🎯 Ketik: `/pick opsi1 opsi2`", parse_mode="Markdown")
     elif tool == "genpass": bot.send_message(call.message.chat.id, "🔑 Ketik: `/genpass 16`", parse_mode="Markdown")
     elif tool == "clear":
-        # Logika Bersihin File Sampah di Folder downloads
         deleted_files = 0
         for f in DOWNLOAD_DIR.glob('*'):
             if f.is_file():
@@ -248,7 +273,6 @@ def callback_tool(call):
                     deleted_files += 1
                 except: pass
         
-        # Bersihin history milik user ini
         cursor.execute("DELETE FROM history WHERE chat_id=?", (call.message.chat.id,))
         conn.commit()
         
@@ -476,7 +500,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V28 - Clear System)...")
+    print("Bot running (V29 - Auto-Rename)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
