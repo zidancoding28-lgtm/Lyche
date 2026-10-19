@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V6 - All UI + Anti-Drop)
+# bot.py — Bot Telegram Full Fitur (V7 - Stable Timeout)
 import os
 import re
 import shutil
@@ -13,14 +13,15 @@ from pathlib import Path
 import yt_dlp
 from telebot import types
 
-# --- TOKEN LANGSUNG DI SINI ---
 BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "./downloads"))
 MAX_FILESIZE_MB = int(os.getenv("MAX_FILESIZE_MB", "50"))
 URL_RE = re.compile(r"https?://\S+")
 
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-bot = telebot.TeleBot(BOT_TOKEN)
+
+# --- TIMEOUT DITAIKIN BIAR GAK GAMPANG PUTUS PAS UPLOAD ---
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 # --- DB SETUP ---
 conn = sqlite3.connect("bot_data.db", check_same_thread=False)
@@ -96,13 +97,15 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
     if path is None: return bot.edit_message_text("Gagal download. Cek link.", message.chat.id, status_msg_id)
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
+    
     try:
         with open(path, "rb") as f:
+            # request_timeout=120 (2 menit) biar server sabar nunggu upload
             if kind == "video":
-                if size_mb > 50: bot.send_document(message.chat.id, f, caption=path.stem)
-                else: bot.send_video(message.chat.id, f, caption=path.stem, supports_streaming=True)
-            elif kind == "audio": bot.send_audio(message.chat.id, f, title=path.stem)
-            else: bot.send_photo(message.chat.id, f, caption=path.stem)
+                if size_mb > 50: bot.send_document(message.chat.id, f, caption=path.stem, timeout=120)
+                else: bot.send_video(message.chat.id, f, caption=path.stem, supports_streaming=True, timeout=120)
+            elif kind == "audio": bot.send_audio(message.chat.id, f, title=path.stem, timeout=120)
+            else: bot.send_photo(message.chat.id, f, caption=path.stem, timeout=120)
         bot.delete_message(message.chat.id, status_msg_id)
     except Exception as e:
         bot.edit_message_text(f"Upload gagal: {e}", message.chat.id, status_msg_id)
@@ -267,7 +270,6 @@ if __name__ == "__main__":
     print("Bot running (Anti-Drop)...")
     while True:
         try:
-            # none_stop=True & timeout disetel biar koneksi lebih tahan banting
             bot.infinity_polling(timeout=15, long_polling_timeout=10, none_stop=True)
         except Exception as e:
             print(f"Koneksi terputus: {e}")
