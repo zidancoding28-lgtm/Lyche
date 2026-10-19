@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V23 - Final Spotify Fix)
+# bot.py — Bot Telegram Ultimate (V24 - Spotify Search Real Fix)
 import os
 import re
 import shutil
@@ -103,7 +103,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
-# --- SPOTIFY BRIDGE (FINAL FIX) ---
+# --- SPOTIFY BRIDGE (REAL FIX) ---
 def resolve_spotify(url, chat_id, status_msg_id):
     try:
         bot.edit_message_text("Membaca metadata Spotify...", chat_id, status_msg_id)
@@ -112,15 +112,14 @@ def resolve_spotify(url, chat_id, status_msg_id):
             title = info.get("title", "")
             artist = info.get("artist") or info.get("uploader") or ""
             
-            safe_title = re.sub(r'[^\w\s-]', '', title)
-            safe_artist = re.sub(r'[^\w\s-]', '', artist)
+            # JANGAN pake regex aneh-aneh. Biarin judul aslinya.
+            query = f"{artist} {title} audio"
+            bot.edit_message_text(f"Mencari di YouTube: {query}...", chat_id, status_msg_id)
             
-            query = f"ytsearch1:{safe_artist} {safe_title} audio"
-            bot.edit_message_text(f"Mencari di YouTube: {safe_artist} - {safe_title}...", chat_id, status_msg_id)
-            
-            # Paksa client web murni biar YouTube gak ngeblokir pencarian
+            # Pake default_search, bukan ytsearch1:
             search_opts = {
                 "quiet": True,
+                "default_search": "ytsearch1",
                 "extractor_args": {"youtube": {"player_client": ["web"]}}
             }
             
@@ -133,8 +132,8 @@ def resolve_spotify(url, chat_id, status_msg_id):
                     print(f"Search 1 error: {e}")
                 
                 # Fallback: Cari pake judul aja
-                bot.edit_message_text(f"Mencari alternatif: {safe_title}...", chat_id, status_msg_id)
-                res2 = search_ydl.extract_info(f"ytsearch1:{safe_title}", download=False)
+                bot.edit_message_text(f"Mencari alternatif: {title}...", chat_id, status_msg_id)
+                res2 = search_ydl.extract_info(title, download=False)
                 if res2 and 'entries' in res2 and len(res2['entries']) > 0:
                     return res2['entries'][0]['webpage_url']
                     
@@ -353,7 +352,7 @@ def cmd_quote(message):
     else: bot.reply_to(message, "Belum ada quote.")
 
 if __name__ == "__main__":
-    print("Bot running (Final Spotify)...")
+    print("Bot running (Spotify Real Fix)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
