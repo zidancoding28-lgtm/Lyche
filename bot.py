@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V20 - Dedicated Spotify Menu)
+# bot.py — Bot Telegram Ultimate (V21 - Spotify Search Fix)
 import os
 import re
 import shutil
@@ -103,7 +103,7 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
-# --- SPOTIFY BRIDGE ---
+# --- SPOTIFY BRIDGE (FIXED SEARCH) ---
 def resolve_spotify(url, chat_id, status_msg_id):
     try:
         bot.edit_message_text("Membaca metadata Spotify...", chat_id, status_msg_id)
@@ -112,13 +112,33 @@ def resolve_spotify(url, chat_id, status_msg_id):
             title = info.get("title", "")
             artist = info.get("artist") or info.get("uploader") or ""
             
-            search_q = f"ytsearch1:{artist} - {title} audio"
-            bot.edit_message_text(f"Mencari lagu di YouTube: {artist} - {title}...", chat_id, status_msg_id)
+            # Bersihin tanda kutip atau karakter aneh dari judul
+            safe_title = re.sub(r'[^\w\s-]', '', title)
+            safe_artist = re.sub(r'[^\w\s-]', '', artist)
             
-            with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as search_ydl:
-                res = search_ydl.extract_info(search_q, download=False)
-                if res and 'entries' in res and len(res['entries']) > 0:
-                    return res['entries'][0]['webpage_url']
+            # Query pencarian
+            search_q = f"ytsearch1:{safe_artist} {safe_title} audio"
+            bot.edit_message_text(f"Mencari di YouTube: {safe_artist} - {safe_title}...", chat_id, status_msg_id)
+            
+            search_opts = {
+                "quiet": True, 
+                "extract_flat": True,
+                "extractor_args": {"youtube": {"player_client": ["ios", "web"]}}
+            }
+            with yt_dlp.YoutubeDL(search_opts) as search_ydl:
+                try:
+                    res = search_ydl.extract_info(search_q, download=False)
+                    if res and 'entries' in res and len(res['entries']) > 0:
+                        return res['entries'][0]['webpage_url']
+                except Exception as e:
+                    print(f"Pencarian 1 gagal: {e}")
+                
+                # Fallback: Cari pake judul aja
+                bot.edit_message_text(f"Mencari alternatif: {safe_title}...", chat_id, status_msg_id)
+                res2 = search_ydl.extract_info(f"ytsearch1:{safe_title} audio", download=False)
+                if res2 and 'entries' in res2 and len(res2['entries']) > 0:
+                    return res2['entries'][0]['webpage_url']
+                    
     except Exception as e:
         print(f"Spotify bridge error: {e}")
     return None
@@ -128,7 +148,7 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
     if "open.spotify.com" in url:
         yt_url = resolve_spotify(url, message.chat.id, status_msg_id)
         if not yt_url:
-            return bot.edit_message_text("Gagal nemu lagu Spotify di YouTube.", message.chat.id, status_msg_id)
+            return bot.edit_message_text("Gagal nemu lagu Spotify di YouTube. Coba cari manual di YouTube.", message.chat.id, status_msg_id)
         final_url = yt_url
         kind = "audio"
 
@@ -155,17 +175,14 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
 @bot.message_handler(commands=['start', 'help'])
 def cmd_start(message):
     markup = types.InlineKeyboardMarkup()
-    # Baris Pertama: Fitur Download
     markup.row(
         types.InlineKeyboardButton("📥 Video", callback_data="menu_video"),
         types.InlineKeyboardButton("🎵 Audio", callback_data="menu_audio"),
         types.InlineKeyboardButton("🖼 Foto", callback_data="menu_photo")
     )
-    # Baris Kedua: Khusus Spotify
     markup.row(
         types.InlineKeyboardButton("🟢 Download Spotify", callback_data="menu_spotify")
     )
-    # Baris Ketiga: Fitur DB & Alat
     markup.row(
         types.InlineKeyboardButton("📝 Catatan", callback_data="menu_notes"),
         types.InlineKeyboardButton("📋 To-do", callback_data="menu_todos"),
@@ -184,10 +201,8 @@ def callback_menu(call):
     
     if cmd in ["video", "audio", "photo"]:
         bot.send_message(call.message.chat.id, f"Tempel link {cmd} sekarang:", reply_markup=types.ForceReply(selective=True))
-    
     elif cmd == "spotify":
-        bot.send_message(call.message.chat.id, "Tempel link Spotify (Track/Album) sekarang:\n\n*(Catatan: Bot akan mencari lagu ini di YouTube karena Spotify diproteksi DRM)*", parse_mode="Markdown", reply_markup=types.ForceReply(selective=True))
-        
+        bot.send_message(call.message.chat.id, "Tempel link Spotify (Track/Album) sekarang:", reply_markup=types.ForceReply(selective=True))
     elif cmd == "notes":
         cursor.execute("SELECT id, text FROM notes WHERE chat_id=?", (call.message.chat.id,))
         rows = cursor.fetchall()
@@ -230,7 +245,6 @@ def callback_tool(call):
 @bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith('/'))
 def on_text(message):
     text = message.text
-    # Deteksi kalau user lagi ngebalas ForceReply
     if message.reply_to_message and "Tempel link" in message.reply_to_message.text:
         parent = message.reply_to_message.text
         match = URL_RE.search(text)
@@ -240,20 +254,15 @@ def on_text(message):
         cursor.execute("INSERT INTO history (chat_id, url) VALUES (?, ?)", (message.chat.id, url))
         conn.commit()
         
-        # Kalau yang di-reply adalah pesan Spotify
         if "Spotify" in parent:
             status = bot.reply_to(message, f"Memproses Spotify...")
-            yt_url = resolve_spotify(url, message.chat.id, status.message_id)
-            if not yt_url:
-                return bot.edit_message_text("Gagal nemu lagu di YouTube.", message.chat.id, status.message_id)
-            _process_download(message, "audio", yt_url, status.message_id)
+            _process_download(message, "audio", url, status.message_id)
         else:
             kind = "video" if "video" in parent else ("audio" if "audio" in parent else "photo")
             status = bot.reply_to(message, f"Downloading ({kind})... [░░░░░░░░░░] 0%")
             _process_download(message, kind, url, status.message_id)
         return
 
-    # Auto-detect link mentah (tanpa reply)
     match = URL_RE.search(text)
     if match:
         url = match.group(0)
@@ -345,7 +354,7 @@ def cmd_quote(message):
     else: bot.reply_to(message, "Belum ada quote.")
 
 if __name__ == "__main__":
-    print("Bot running (Dedicated Spotify)...")
+    print("Bot running (Spotify Fix)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
