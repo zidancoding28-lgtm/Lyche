@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V29 - Auto-Rename)
+# bot.py — Bot Telegram Ultimate (V30b - System Info Native)
 import os
 import re
 import shutil
@@ -9,6 +9,7 @@ import random
 import time
 import threading
 import subprocess
+import json
 import telebot
 import yt_dlp
 import requests
@@ -36,6 +37,29 @@ cursor.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat
 cursor.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS watches (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, last_hash TEXT)")
 conn.commit()
+
+# --- NATIVE SYSTEM INFO FUNCTIONS ---
+def get_battery_info():
+    try:
+        with open('/sys/class/power_supply/battery/capacity', 'r') as f:
+            capacity = f.read().strip()
+        with open('/sys/class/power_supply/battery/status', 'r') as f:
+            status = f.read().strip()
+        with open('/sys/class/power_supply/battery/temp', 'r') as f:
+            temp = int(f.read().strip()) / 10.0
+        return f"🔋 **Baterai:** {capacity}%\nStatus: {status}\nSuhu: {temp}°C"
+    except:
+        return "❌ Gagal baca baterai (file sys gak bisa diakses)."
+
+def get_local_ip():
+    try:
+        out = subprocess.check_output(['ifconfig'], text=True)
+        match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', out)
+        if match:
+            return f"🌐 **IP Lokal:** `{match.group(1)}`"
+        return "IP tidak ditemukan."
+    except:
+        return "❌ Gagal baca IP."
 
 # --- QUEUE SYSTEM ---
 download_queue = []
@@ -91,13 +115,11 @@ def _pick_thumb(info: dict) -> str | None:
     return imgs[-1]["url"]
 
 def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> dict | None:
-    """Mengembalikan dict berisi path file dan metadata (judul, artis)."""
     try:
         with yt_dlp.YoutubeDL(_ydl_opts(kind, chat_id, msg_id)) as ydl:
             info = ydl.extract_info(url, download=(kind != "photo"))
             if info is None: return None
             
-            # --- AUTO RENAME LOGIC ---
             raw_title = info.get("title", "Unknown")
             artist = info.get("artist") or info.get("uploader") or info.get("channel") or ""
             
@@ -106,9 +128,8 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> dict | Non
             else:
                 clean_name = raw_title
                 
-            # Bersihin karakter aneh buat nama file
             clean_name = re.sub(r'[\\/*?:"<>|]', "", clean_name).strip()
-            clean_name = clean_name[:100] # Batasin panjang nama file
+            clean_name = clean_name[:100]
 
             if kind == "photo":
                 thumb_url = _pick_thumb(info)
@@ -131,13 +152,11 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> dict | Non
                     if cand.exists(): path = cand; break
                 else: return None
             
-            # Rename file fisiknya
             new_path = DOWNLOAD_DIR / f"{clean_name}{path.suffix}"
             try:
                 path.rename(new_path)
                 path = new_path
-            except: pass # Kalau gagal rename (file exists), biarin pake nama lama
-            
+            except: pass
             return {"path": path, "title": clean_name}
     except Exception as e:
         print(f"download error ({kind}): {e}")
@@ -249,6 +268,7 @@ def callback_menu(call):
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton("🎲 Roll Dadu", callback_data="tool_roll"), types.InlineKeyboardButton("🎯 Pick", callback_data="tool_pick"))
         markup.row(types.InlineKeyboardButton("🔑 Genpass", callback_data="tool_genpass"), types.InlineKeyboardButton("🕒 Time", callback_data="tool_time"))
+        markup.row(types.InlineKeyboardButton("🔋 Baterai", callback_data="tool_batt"), types.InlineKeyboardButton("🌐 IP Lokal", callback_data="tool_ip"))
         markup.row(types.InlineKeyboardButton("🗑 Bersihkan Cache", callback_data="tool_clear"))
         markup.row(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back"))
         bot.edit_message_text("⚙️ **Menu Alat:**", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
@@ -264,6 +284,8 @@ def callback_tool(call):
     elif tool == "roll": bot.send_message(call.message.chat.id, "🎲 Ketik: `/roll 2d6`", parse_mode="Markdown")
     elif tool == "pick": bot.send_message(call.message.chat.id, "🎯 Ketik: `/pick opsi1 opsi2`", parse_mode="Markdown")
     elif tool == "genpass": bot.send_message(call.message.chat.id, "🔑 Ketik: `/genpass 16`", parse_mode="Markdown")
+    elif tool == "batt": bot.send_message(call.message.chat.id, get_battery_info(), parse_mode="Markdown")
+    elif tool == "ip": bot.send_message(call.message.chat.id, get_local_ip(), parse_mode="Markdown")
     elif tool == "clear":
         deleted_files = 0
         for f in DOWNLOAD_DIR.glob('*'):
@@ -376,6 +398,14 @@ def handle_ocr(message):
         temp_upscaled.unlink(missing_ok=True)
 
 # --- UTILITY COMMANDS ---
+@bot.message_handler(commands=['baterai'])
+def cmd_batt(message):
+    bot.reply_to(message, get_battery_info(), parse_mode="Markdown")
+
+@bot.message_handler(commands=['ip'])
+def cmd_ip(message):
+    bot.reply_to(message, get_local_ip(), parse_mode="Markdown")
+
 @bot.message_handler(commands=['remind'])
 def cmd_remind(message):
     try:
@@ -422,14 +452,6 @@ def cmd_clear(message):
     cursor.execute("DELETE FROM history WHERE chat_id=?", (message.chat.id,))
     conn.commit()
     bot.reply_to(message, f"🗑 **Cache dibersihkan!**\n- {deleted_files} file sampah dihapus.\n- Riwayat download dikosongkan.", parse_mode="Markdown")
-
-@bot.message_handler(commands=['lock'])
-def cmd_lock(message):
-    bot.reply_to(message, "Fitur lock bot belum diimplementasi penuh.")
-
-@bot.message_handler(commands=['unlock'])
-def cmd_unlock(message):
-    bot.reply_to(message, "Fitur unlock bot belum diimplementasi penuh.")
 
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
@@ -500,7 +522,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V29 - Auto-Rename)...")
+    print("Bot running (V30b - Native System Info)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
