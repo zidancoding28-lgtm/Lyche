@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Full Fitur (V9 - Spotify to YouTube Bypass)
+# bot.py — Bot Telegram Full Fitur (V10 - YouTube Focus)
 import os
 import re
 import shutil
@@ -96,41 +96,10 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
-# --- SPOTIFY BYPASS ---
-def resolve_spotify_to_youtube(spotify_url, chat_id, status_msg_id):
-    ydl_opts = {"quiet": True, "extract_flat": True, "skip_download": True}
-    try:
-        bot.edit_message_text("Baca data Spotify...", chat_id, status_msg_id)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(spotify_url, download=False)
-            if not info: return None
-            
-            title = info.get("title", "")
-            artist = info.get("artist") or info.get("uploader") or ""
-            search_query = f"ytsearch1:{artist} - {title} audio"
-            
-            bot.edit_message_text(f"Cari di YouTube: {artist} - {title}...", chat_id, status_msg_id)
-            search_results = ydl.extract_info(search_query, download=False)
-            if search_results and 'entries' in search_results and len(search_results['entries']) > 0:
-                return search_results['entries'][0]['webpage_url']
-    except Exception as e:
-        print(f"Spotify bypass error: {e}")
-    return None
-
 def _process_download(message, kind: str, url: str, status_msg_id: int):
-    final_url = url
-    if "open.spotify.com" in url:
-        bot.edit_message_text("Link Spotify terdeteksi. Nyari lagu di YouTube...", message.chat.id, status_msg_id)
-        yt_url = resolve_spotify_to_youtube(url, message.chat.id, status_msg_id)
-        if not yt_url:
-            return bot.edit_message_text("Gagal nemu lagu di YouTube. Coba cari manual.", message.chat.id, status_msg_id)
-        final_url = yt_url
-        # Kalau dari Spotify, paksa jadi audio
-        kind = "audio"
-
-    path = _sync_download(final_url, kind, message.chat.id, status_msg_id)
+    path = _sync_download(url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Cek link atau ukuran file.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -147,20 +116,33 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
         bot.edit_message_text(f"Upload gagal: {e}", message.chat.id, status_msg_id)
     finally: path.unlink(missing_ok=True)
 
-# --- UI MENU & HANDLERS (Sama kayak sebelumnya) ---
+# --- UI MENU ---
 @bot.message_handler(commands=['start', 'help'])
 def cmd_start(message):
     markup = types.InlineKeyboardMarkup()
-    markup.row(types.InlineKeyboardButton("📥 Video", callback_data="menu_video"), types.InlineKeyboardButton("🎵 Audio", callback_data="menu_audio"), types.InlineKeyboardButton("🖼 Foto", callback_data="menu_photo"))
-    markup.row(types.InlineKeyboardButton("📝 Catatan", callback_data="menu_notes"), types.InlineKeyboardButton("📋 To-do", callback_data="menu_todos"), types.InlineKeyboardButton("💬 Quote", callback_data="menu_quote"))
-    markup.row(types.InlineKeyboardButton("🕒 History", callback_data="menu_history"), types.InlineKeyboardButton("⚙️ Alat", callback_data="menu_tools"))
+    markup.row(
+        types.InlineKeyboardButton("📥 Video", callback_data="menu_video"),
+        types.InlineKeyboardButton("🎵 Audio", callback_data="menu_audio"),
+        types.InlineKeyboardButton("🖼 Foto", callback_data="menu_photo")
+    )
+    markup.row(
+        types.InlineKeyboardButton("📝 Catatan", callback_data="menu_notes"),
+        types.InlineKeyboardButton("📋 To-do", callback_data="menu_todos"),
+        types.InlineKeyboardButton("💬 Quote", callback_data="menu_quote")
+    )
+    markup.row(
+        types.InlineKeyboardButton("🕒 History", callback_data="menu_history"),
+        types.InlineKeyboardButton("⚙️ Alat", callback_data="menu_tools")
+    )
     bot.reply_to(message, "Silakan pilih menu di bawah:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("menu_"))
 def callback_menu(call):
     cmd = call.data.replace("menu_", "")
     bot.answer_callback_query(call.id)
-    if cmd in ["video", "audio", "photo"]: bot.send_message(call.message.chat.id, f"Tempel link {cmd} sekarang:", reply_markup=types.ForceReply(selective=True))
+    
+    if cmd in ["video", "audio", "photo"]:
+        bot.send_message(call.message.chat.id, f"Tempel link {cmd} sekarang:", reply_markup=types.ForceReply(selective=True))
     elif cmd == "notes":
         cursor.execute("SELECT id, text FROM notes WHERE chat_id=?", (call.message.chat.id,))
         rows = cursor.fetchall()
@@ -187,7 +169,8 @@ def callback_menu(call):
         markup.row(types.InlineKeyboardButton("🔑 Genpass", callback_data="tool_genpass"), types.InlineKeyboardButton("🕒 Time", callback_data="tool_time"))
         markup.row(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back"))
         bot.edit_message_text("⚙️ **Menu Alat:**", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
-    elif cmd == "back": cmd_start(call.message)
+    elif cmd == "back":
+        cmd_start(call.message)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("tool_"))
 def callback_tool(call):
@@ -198,6 +181,7 @@ def callback_tool(call):
     elif tool == "pick": bot.send_message(call.message.chat.id, "🎯 Ketik: `/pick opsi1 opsi2`", parse_mode="Markdown")
     elif tool == "genpass": bot.send_message(call.message.chat.id, "🔑 Ketik: `/genpass 16`", parse_mode="Markdown")
 
+# --- TEXT HANDLERS ---
 @bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith('/'))
 def on_text(message):
     text = message.text
@@ -236,6 +220,7 @@ def callback_dl_url(call):
         _process_download(call.message, kind, url, status.message_id)
     except Exception as e: bot.send_message(call.message.chat.id, f"Error: {e}")
 
+# --- UTILITY COMMANDS ---
 @bot.message_handler(commands=['id'])
 def cmd_id(message): bot.reply_to(message, f"ID: `{message.chat.id}`", parse_mode="Markdown")
 
@@ -281,7 +266,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (Spotify Bypass)...")
+    print("Bot running (YouTube Focus)...")
     while True:
         try:
             bot.infinity_polling(timeout=15, long_polling_timeout=10, none_stop=True)
