@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V25 - Complete Package)
+# bot.py — Bot Telegram Ultimate (V27 - TikTok Fix)
 import os
 import re
 import shutil
@@ -48,7 +48,6 @@ def process_queue():
             if not download_queue:
                 continue
             task = download_queue.pop(0)
-        # Proses download di luar lock biar gak nge-blok antrean lain
         _process_download(task['message'], task['kind'], task['url'], task['status_id'])
 
 threading.Thread(target=process_queue, daemon=True).start()
@@ -77,8 +76,8 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
         "socket_timeout": 15, 
         "retries": 5,
-        "source_address": "0.0.0.0",
-        "extractor_args": {"youtube": {"player_client": ["ios", "android", "web"]}}
+        "source_address": "0.0.0.0"
+        # extractor_args dibuang biar yt-dlp otomatis milih client per platform
     }
     if kind == "video": base.update(format="bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", merge_output_format="mp4")
     elif kind == "audio": base.update(format="bestaudio/best", postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}])
@@ -152,11 +151,11 @@ def set_reminder(chat_id, delay, text):
 # --- SCRAPER SYSTEM ---
 def scrape_watch(chat_id, url, watch_id):
     while True:
-        time.sleep(600) # Cek tiap 10 menit
+        time.sleep(600) 
         try:
             cursor.execute("SELECT last_hash FROM watches WHERE id=?", (watch_id,))
             row = cursor.fetchone()
-            if not row: break # Dihapus
+            if not row: break 
             last_hash = row[0]
             
             res = requests.get(url, timeout=10)
@@ -311,20 +310,29 @@ def handle_video_local(message):
 # --- OCR LOKAL ---
 @bot.message_handler(content_types=['photo'])
 def handle_ocr(message):
+    status = bot.reply_to(message, "Membaca teks (OCR)...")
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         temp_img = DOWNLOAD_DIR / f"ocr_{message.photo[-1].file_id}.jpg"
+        temp_upscaled = DOWNLOAD_DIR / f"ocr_up_{message.photo[-1].file_id}.jpg"
+        
         with open(temp_img, 'wb') as f: f.write(downloaded_file)
         
-        result = subprocess.run(['tesseract', str(temp_img), 'stdout', '-l', 'ind'], capture_output=True, text=True)
+        subprocess.run(['ffmpeg', '-y', '-i', str(temp_img), '-vf', 'scale=iw*2:ih*2', str(temp_upscaled)], check=True, capture_output=True)
+        
+        result = subprocess.run(['tesseract', str(temp_upscaled), 'stdout', '-l', 'eng'], capture_output=True, text=True)
         text = result.stdout.strip()
-        if text: bot.reply_to(message, f"📄 **Hasil OCR:**\n\n{text}")
-        else: bot.reply_to(message, "Teks tidak terdeteksi.")
+        
+        if text: 
+            bot.edit_message_text(f"📄 **Hasil OCR:**\n\n{text}", message.chat.id, status.message_id)
+        else: 
+            bot.edit_message_text("Teks tidak terdeteksi. Pastiin gambar gak burem.", message.chat.id, status.message_id)
     except Exception as e:
-        bot.reply_to(message, f"Gagal OCR: {e}")
+        bot.edit_message_text(f"Gagal OCR: {e}", message.chat.id, status.message_id)
     finally:
         temp_img.unlink(missing_ok=True)
+        temp_upscaled.unlink(missing_ok=True)
 
 # --- UTILITY COMMANDS ---
 @bot.message_handler(commands=['remind'])
@@ -437,7 +445,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V25)...")
+    print("Bot running (V27 - TikTok Fix)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
