@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V24 - Spotify Search Real Fix)
+# bot.py — Bot Telegram Ultimate (V25 - Complete Package)
 import os
 import re
 import shutil
@@ -7,9 +7,13 @@ import hashlib
 import secrets
 import random
 import time
+import threading
+import subprocess
 import telebot
 import yt_dlp
-from datetime import datetime
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
 from pathlib import Path
 from telebot import types
 
@@ -29,7 +33,25 @@ cursor.execute("CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY, chat_i
 cursor.execute("CREATE TABLE IF NOT EXISTS quotes (id INTEGER PRIMARY KEY, text TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS autoreplies (keyword TEXT PRIMARY KEY, reply TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+cursor.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER PRIMARY KEY)")
+cursor.execute("CREATE TABLE IF NOT EXISTS watches (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, last_hash TEXT)")
 conn.commit()
+
+# --- QUEUE SYSTEM ---
+download_queue = []
+queue_lock = threading.Lock()
+
+def process_queue():
+    while True:
+        time.sleep(1)
+        with queue_lock:
+            if not download_queue:
+                continue
+            task = download_queue.pop(0)
+        # Proses download di luar lock biar gak nge-blok antrean lain
+        _process_download(task['message'], task['kind'], task['url'], task['status_id'])
+
+threading.Thread(target=process_queue, daemon=True).start()
 
 # --- DOWNLOAD LOGIC ---
 def _hook_with_ids(d, chat_id, msg_id):
@@ -56,11 +78,7 @@ def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
         "socket_timeout": 15, 
         "retries": 5,
         "source_address": "0.0.0.0",
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "android", "web"]
-            }
-        }
+        "extractor_args": {"youtube": {"player_client": ["ios", "android", "web"]}}
     }
     if kind == "video": base.update(format="bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", merge_output_format="mp4")
     elif kind == "audio": base.update(format="bestaudio/best", postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}])
@@ -103,56 +121,10 @@ def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> Path | Non
         print(f"download error ({kind}): {e}")
         return None
 
-# --- SPOTIFY BRIDGE (REAL FIX) ---
-def resolve_spotify(url, chat_id, status_msg_id):
-    try:
-        bot.edit_message_text("Membaca metadata Spotify...", chat_id, status_msg_id)
-        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get("title", "")
-            artist = info.get("artist") or info.get("uploader") or ""
-            
-            # JANGAN pake regex aneh-aneh. Biarin judul aslinya.
-            query = f"{artist} {title} audio"
-            bot.edit_message_text(f"Mencari di YouTube: {query}...", chat_id, status_msg_id)
-            
-            # Pake default_search, bukan ytsearch1:
-            search_opts = {
-                "quiet": True,
-                "default_search": "ytsearch1",
-                "extractor_args": {"youtube": {"player_client": ["web"]}}
-            }
-            
-            with yt_dlp.YoutubeDL(search_opts) as search_ydl:
-                try:
-                    res = search_ydl.extract_info(query, download=False)
-                    if res and 'entries' in res and len(res['entries']) > 0:
-                        return res['entries'][0]['webpage_url']
-                except Exception as e:
-                    print(f"Search 1 error: {e}")
-                
-                # Fallback: Cari pake judul aja
-                bot.edit_message_text(f"Mencari alternatif: {title}...", chat_id, status_msg_id)
-                res2 = search_ydl.extract_info(title, download=False)
-                if res2 and 'entries' in res2 and len(res2['entries']) > 0:
-                    return res2['entries'][0]['webpage_url']
-                    
-    except Exception as e:
-        print(f"Spotify bridge error: {e}")
-    return None
-
 def _process_download(message, kind: str, url: str, status_msg_id: int):
-    final_url = url
-    if "open.spotify.com" in url:
-        yt_url = resolve_spotify(url, message.chat.id, status_msg_id)
-        if not yt_url:
-            return bot.edit_message_text("Gagal nemu lagu di YouTube. Jaringan diblokir, atau judul lagu gak ada di YT.", message.chat.id, status_msg_id)
-        final_url = yt_url
-        kind = "audio"
-
-    path = _sync_download(final_url, kind, message.chat.id, status_msg_id)
+    path = _sync_download(url, kind, message.chat.id, status_msg_id)
     if path is None: 
-        return bot.edit_message_text("Gagal download. Operator lu ngeblokir. Nyalain WARP/1.1.1.1.", message.chat.id, status_msg_id)
+        return bot.edit_message_text("Gagal download. Jaringan diblokir / link invalid.", message.chat.id, status_msg_id)
     
     size_mb = path.stat().st_size / (1024 * 1024)
     bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
@@ -169,17 +141,46 @@ def _process_download(message, kind: str, url: str, status_msg_id: int):
         bot.edit_message_text(f"Upload gagal: {e}", message.chat.id, status_msg_id)
     finally: path.unlink(missing_ok=True)
 
+# --- REMINDER SYSTEM ---
+def set_reminder(chat_id, delay, text):
+    def send_reminder():
+        try: bot.send_message(chat_id, f"⏰ **PENGINGAT:** {text}", parse_mode="Markdown")
+        except: pass
+    t = threading.Timer(delay, send_reminder)
+    t.start()
+
+# --- SCRAPER SYSTEM ---
+def scrape_watch(chat_id, url, watch_id):
+    while True:
+        time.sleep(600) # Cek tiap 10 menit
+        try:
+            cursor.execute("SELECT last_hash FROM watches WHERE id=?", (watch_id,))
+            row = cursor.fetchone()
+            if not row: break # Dihapus
+            last_hash = row[0]
+            
+            res = requests.get(url, timeout=10)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            current_text = soup.get_text()
+            current_hash = hashlib.md5(current_text.encode()).hexdigest()
+            
+            if current_hash != last_hash:
+                bot.send_message(chat_id, f"🔔 **PERUBAHAN TERDETEKSI:**\n{url}")
+                cursor.execute("UPDATE watches SET last_hash=? WHERE id=?", (current_hash, watch_id))
+                conn.commit()
+        except: pass
+
 # --- UI MENU ---
 @bot.message_handler(commands=['start', 'help'])
 def cmd_start(message):
+    cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (message.chat.id,))
+    conn.commit()
+    
     markup = types.InlineKeyboardMarkup()
     markup.row(
         types.InlineKeyboardButton("📥 Video", callback_data="menu_video"),
         types.InlineKeyboardButton("🎵 Audio", callback_data="menu_audio"),
         types.InlineKeyboardButton("🖼 Foto", callback_data="menu_photo")
-    )
-    markup.row(
-        types.InlineKeyboardButton("🟢 Download Spotify", callback_data="menu_spotify")
     )
     markup.row(
         types.InlineKeyboardButton("📝 Catatan", callback_data="menu_notes"),
@@ -199,8 +200,6 @@ def callback_menu(call):
     
     if cmd in ["video", "audio", "photo"]:
         bot.send_message(call.message.chat.id, f"Tempel link {cmd} sekarang:", reply_markup=types.ForceReply(selective=True))
-    elif cmd == "spotify":
-        bot.send_message(call.message.chat.id, "Tempel link Spotify (Track/Album) sekarang:\n\n*(Catatan: Bot akan mencari lagu ini di YouTube karena Spotify diproteksi DRM)*", parse_mode="Markdown", reply_markup=types.ForceReply(selective=True))
     elif cmd == "notes":
         cursor.execute("SELECT id, text FROM notes WHERE chat_id=?", (call.message.chat.id,))
         rows = cursor.fetchall()
@@ -252,13 +251,11 @@ def on_text(message):
         cursor.execute("INSERT INTO history (chat_id, url) VALUES (?, ?)", (message.chat.id, url))
         conn.commit()
         
-        if "Spotify" in parent:
-            status = bot.reply_to(message, f"Memproses Spotify...")
-            _process_download(message, "audio", url, status.message_id)
-        else:
-            kind = "video" if "video" in parent else ("audio" if "audio" in parent else "photo")
-            status = bot.reply_to(message, f"Downloading ({kind})... [░░░░░░░░░░] 0%")
-            _process_download(message, kind, url, status.message_id)
+        kind = "video" if "video" in parent else ("audio" if "audio" in parent else "photo")
+        status = bot.reply_to(message, f"Masuk antrean ({kind})...")
+        
+        with queue_lock:
+            download_queue.append({'message': message, 'kind': kind, 'url': url, 'status_id': status.message_id})
         return
 
     match = URL_RE.search(text)
@@ -278,17 +275,123 @@ def callback_dl_url(call):
         data = call.data.split("|")
         kind = data[0].replace("dl_url_", "")
         url = data[1]
-        bot.answer_callback_query(call.id, f"Memproses...")
+        bot.answer_callback_query(call.id, f"Masuk antrean...")
         bot.delete_message(call.message.chat.id, call.message.message_id)
         
         cursor.execute("INSERT INTO history (chat_id, url) VALUES (?, ?)", (call.message.chat.id, url))
         conn.commit()
         
-        status = bot.send_message(call.message.chat.id, f"Downloading ({kind})... [░░░░░░░░░░] 0%")
-        _process_download(call.message, kind, url, status.message_id)
+        status = bot.send_message(call.message.chat.id, f"Masuk antrean ({kind})...")
+        with queue_lock:
+            download_queue.append({'message': call.message, 'kind': kind, 'url': url, 'status_id': status.message_id})
     except Exception as e: bot.send_message(call.message.chat.id, f"Error: {e}")
 
+# --- EKSTRAK AUDIO LOKAL ---
+@bot.message_handler(content_types=['video', 'video_note'])
+def handle_video_local(message):
+    status = bot.reply_to(message, "Mengekstrak audio...")
+    file_info = bot.get_file(message.video.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+    
+    temp_vid = DOWNLOAD_DIR / f"temp_{message.video.file_id}.mp4"
+    temp_mp3 = DOWNLOAD_DIR / f"audio_{message.video.file_id}.mp3"
+    with open(temp_vid, 'wb') as f: f.write(downloaded_file)
+    
+    try:
+        subprocess.run(['ffmpeg', '-y', '-i', str(temp_vid), '-q:a', '0', '-map', 'a', str(temp_mp3)], check=True, capture_output=True)
+        with open(temp_mp3, 'rb') as f:
+            bot.send_audio(message.chat.id, f, title="Audio Extract")
+        bot.delete_message(message.chat.id, status.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"Gagal ekstrak: {e}", message.chat.id, status.message_id)
+    finally:
+        temp_vid.unlink(missing_ok=True)
+        temp_mp3.unlink(missing_ok=True)
+
+# --- OCR LOKAL ---
+@bot.message_handler(content_types=['photo'])
+def handle_ocr(message):
+    try:
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        temp_img = DOWNLOAD_DIR / f"ocr_{message.photo[-1].file_id}.jpg"
+        with open(temp_img, 'wb') as f: f.write(downloaded_file)
+        
+        result = subprocess.run(['tesseract', str(temp_img), 'stdout', '-l', 'ind'], capture_output=True, text=True)
+        text = result.stdout.strip()
+        if text: bot.reply_to(message, f"📄 **Hasil OCR:**\n\n{text}")
+        else: bot.reply_to(message, "Teks tidak terdeteksi.")
+    except Exception as e:
+        bot.reply_to(message, f"Gagal OCR: {e}")
+    finally:
+        temp_img.unlink(missing_ok=True)
+
 # --- UTILITY COMMANDS ---
+@bot.message_handler(commands=['remind'])
+def cmd_remind(message):
+    try:
+        parts = message.text.split(' ', 2)
+        time_str, text = parts[1], parts[2]
+        unit = time_str[-1].lower()
+        val = int(time_str[:-1])
+        
+        if unit == 'm': delay = val * 60
+        elif unit == 'h': delay = val * 3600
+        else: return bot.reply_to(message, "Format: /remind 10m <teks>")
+        
+        set_reminder(message.chat.id, delay, text)
+        bot.reply_to(message, f"⏰ Pengingat disetel dalam {time_str}.")
+    except: bot.reply_to(message, "Format: /remind 10m <teks>")
+
+@bot.message_handler(commands=['watch'])
+def cmd_watch(message):
+    match = URL_RE.search(message.text)
+    if not match: return bot.reply_to(message, "Format: /watch <url>")
+    url = match.group(0)
+    
+    res = requests.get(url, timeout=10)
+    soup = BeautifulSoup(res.text, 'html.parser')
+    current_hash = hashlib.md5(soup.get_text().encode()).hexdigest()
+    
+    cursor.execute("INSERT INTO watches (chat_id, url, last_hash) VALUES (?, ?, ?)", (message.chat.id, url, current_hash))
+    conn.commit()
+    watch_id = cursor.lastrowid
+    
+    threading.Thread(target=scrape_watch, args=(message.chat.id, url, watch_id), daemon=True).start()
+    bot.reply_to(message, "✅ Memantau halaman. Akan diberitahu jika ada perubahan.")
+
+@bot.message_handler(commands=['lock'])
+def cmd_lock(message):
+    bot.reply_to(message, "Fitur lock bot belum diimplementasi penuh.")
+
+@bot.message_handler(commands=['unlock'])
+def cmd_unlock(message):
+    bot.reply_to(message, "Fitur unlock bot belum diimplementasi penuh.")
+
+@bot.message_handler(commands=['broadcast'])
+def cmd_broadcast(message):
+    text = message.text.replace('/broadcast ', '')
+    if not text: return bot.reply_to(message, "Format: /broadcast <pesan>")
+    
+    cursor.execute("SELECT chat_id FROM users")
+    rows = cursor.fetchall()
+    success = 0
+    for r in rows:
+        try:
+            bot.send_message(r[0], f"📢 **PENGUMUMAN:**\n\n{text}", parse_mode="Markdown")
+            success += 1
+        except: pass
+    bot.reply_to(message, f"Broadcast terkirim ke {success} user.")
+
+@bot.message_handler(commands=['stats'])
+def cmd_stats(message):
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM history")
+    downloads = cursor.fetchone()[0]
+    total_size = sum(f.stat().st_size for f in DOWNLOAD_DIR.glob('**/*') if f.is_file()) / (1024 * 1024)
+    bot.reply_to(message, f"📊 **Stats Bot:**\nUser: {users}\nTotal Download: {downloads}\nDisk: {total_size:.1f} MB")
+
 @bot.message_handler(commands=['id'])
 def cmd_id(message): bot.reply_to(message, f"ID: `{message.chat.id}`", parse_mode="Markdown")
 
@@ -333,26 +436,8 @@ def cmd_todo(message):
     cursor.execute("INSERT INTO todos (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
-@bot.message_handler(commands=['history'])
-def cmd_history(message):
-    cursor.execute("SELECT url FROM history WHERE chat_id=? ORDER BY id DESC LIMIT 5", (message.chat.id,))
-    rows = cursor.fetchall()
-    text = "🕒 **History:**\n\n" + "\n".join([f"- {r[0]}" for r in rows]) if rows else "Belum ada history."
-    bot.reply_to(message, text, parse_mode="Markdown")
-
-@bot.message_handler(commands=['quote'])
-def cmd_quote(message):
-    text = message.text.replace('/quote ', '')
-    if text and text != '/quote':
-        cursor.execute("INSERT INTO quotes (text) VALUES (?)", (text,)); conn.commit()
-        return bot.reply_to(message, "✅ Quote disimpan.")
-    cursor.execute("SELECT text FROM quotes ORDER BY RANDOM() LIMIT 1")
-    res = cursor.fetchone()
-    if res: bot.reply_to(message, f"💬 \"{res[0]}\"")
-    else: bot.reply_to(message, "Belum ada quote.")
-
 if __name__ == "__main__":
-    print("Bot running (Spotify Real Fix)...")
+    print("Bot running (V25)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
