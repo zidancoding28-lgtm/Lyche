@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V30b - System Info Native)
+# bot.py — Bot Telegram Ultimate (V30c - Battery Fix via dumpsys)
 import os
 import re
 import shutil
@@ -41,25 +41,38 @@ conn.commit()
 # --- NATIVE SYSTEM INFO FUNCTIONS ---
 def get_battery_info():
     try:
-        with open('/sys/class/power_supply/battery/capacity', 'r') as f:
-            capacity = f.read().strip()
-        with open('/sys/class/power_supply/battery/status', 'r') as f:
-            status = f.read().strip()
-        with open('/sys/class/power_supply/battery/temp', 'r') as f:
-            temp = int(f.read().strip()) / 10.0
-        return f"🔋 **Baterai:** {capacity}%\nStatus: {status}\nSuhu: {temp}°C"
-    except:
-        return "❌ Gagal baca baterai (file sys gak bisa diakses)."
+        # Trik bypass permission: Baca lewat dumpsys battery
+        out = subprocess.check_output(['dumpsys', 'battery'], text=True)
+        level = re.search(r'level:\s*(\d+)', out)
+        temp = re.search(r'temperature:\s*(\d+)', out)
+        status = re.search(r'status:\s*(\d+)', out)
+        
+        if not level: return "❌ Gagal baca level baterai."
+        
+        status_map = {"1": "Unknown", "2": "Charging", "3": "Discharging", "4": "Not Charging", "5": "Full"}
+        st = status_map.get(status.group(1) if status else "", "Unknown")
+        tp = f"{int(temp.group(1))/10.0}°C" if temp else "N/A"
+        
+        return f"🔋 **Baterai:** {level.group(1)}%\nStatus: {st}\nSuhu: {tp}"
+    except Exception as e:
+        return f"❌ Gagal baca baterai: {e}"
 
 def get_local_ip():
     try:
-        out = subprocess.check_output(['ifconfig'], text=True)
+        out = subprocess.check_output(['ip', 'addr', 'show', 'wlan0'], text=True)
         match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', out)
         if match:
-            return f"🌐 **IP Lokal:** `{match.group(1)}`"
-        return "IP tidak ditemukan."
+            return f"🌐 **IP Lokal (WiFi):** `{match.group(1)}`"
+        
+        # Fallback ke data seluler
+        out2 = subprocess.check_output(['ip', 'addr', 'show', 'rmnet_data0'], text=True)
+        match2 = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', out2)
+        if match2:
+            return f"🌐 **IP Lokal (Data):** `{match2.group(1)}`"
+            
+        return "IP tidak ditemukan. Pastiin jaringan nyala."
     except:
-        return "❌ Gagal baca IP."
+        return "❌ Gagal baca IP (Interface tidak dikenal)."
 
 # --- QUEUE SYSTEM ---
 download_queue = []
@@ -522,7 +535,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V30b - Native System Info)...")
+    print("Bot running (V30c - Battery Fix)...")
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
