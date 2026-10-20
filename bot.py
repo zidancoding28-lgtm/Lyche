@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Pribadi (V36 - No ForceSub, Locked)
+# bot.py — Bot Telegram Pribadi (V37 - Locked to Owner)
 import os
 import re
 import shutil
@@ -23,9 +23,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
 
 # --- PENGATURAN PEMILIK BOT ---
-# Ganti dengan ID Telegram lu (ketik /id di bot lain buat ngecek ID lu)
-# Kalau dibiarin kosong (""), bot bisa dipake siapa aja (Publik)
-OWNER_ID = 123456789 
+OWNER_ID = 8901247073
 
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "./downloads"))
 MAX_FILESIZE_MB = int(os.getenv("MAX_FILESIZE_MB", "50"))
@@ -48,8 +46,6 @@ conn.commit()
 
 # --- MIDDLEWARE: CEK APAKAH DIA OWNER ---
 def check_owner(message):
-    if OWNER_ID == 0: 
-        return True # Kalau 0, bebas akses
     if message.from_user.id == OWNER_ID:
         return True
     
@@ -236,7 +232,7 @@ def cmd_start(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("menu_"))
 def callback_menu(call):
-    if OWNER_ID != 0 and call.from_user.id != OWNER_ID:
+    if call.from_user.id != OWNER_ID:
         return bot.answer_callback_query(call.id, "Akses Ditolak.", show_alert=True)
 
     cmd = call.data.replace("menu_", "")
@@ -276,7 +272,7 @@ def callback_menu(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("tool_"))
 def callback_tool(call):
-    if OWNER_ID != 0 and call.from_user.id != OWNER_ID:
+    if call.from_user.id != OWNER_ID:
         return bot.answer_callback_query(call.id, "Akses Ditolak.", show_alert=True)
 
     tool = call.data.replace("tool_", "")
@@ -335,7 +331,7 @@ def on_text(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("dl_url_"))
 def callback_dl_url(call):
-    if OWNER_ID != 0 and call.from_user.id != OWNER_ID:
+    if call.from_user.id != OWNER_ID:
         return bot.answer_callback_query(call.id, "Akses Ditolak.", show_alert=True)
 
     try:
@@ -638,7 +634,9 @@ def cmd_clear(message):
 
 @bot.message_handler(commands=['stats'])
 def cmd_stats(message):
-    if not check_owner(message): return    cursor.execute("SELECT COUNT(*) FROM users")
+    if not check_owner(message): return
+    
+    cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM history")
     downloads = cursor.fetchone()[0]
@@ -696,7 +694,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V36 - Private Mode)...")
+    print("Bot running (V37 - Locked to Owner)...")
     while True:
         try:
             # Longgarkan timeout jadi 60 detik biar koneksi lebih stabil
