@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V32 - Quote, ASCII, Timeout Fix)
+# bot.py — Bot Telegram Ultimate (V34 - Custom Fake Menu)
 import os
 import re
 import shutil
@@ -465,6 +465,90 @@ def cmd_dl(message):
     finally:
         temp_img.unlink(missing_ok=True)
 
+# --- FITUR BARU: FAKE CONTEXT MENU (CUSTOM TEXT) ---
+@bot.message_handler(commands=['menu'])
+def cmd_fake_menu(message):
+    text_input = message.text.replace('/menu ', '').strip()
+    if not text_input: return bot.reply_to(message, "Format: `/menu <Teks> | <Waktu> | <Item1>, <Item2>`", parse_mode="Markdown")
+
+    # Parsing input pake pemisah '|'
+    parts = [p.strip() for p in text_input.split('|')]
+    
+    bubble_text = parts[0] if len(parts) > 0 else "Halo"
+    time_text = parts[1] if len(parts) > 1 else datetime.now().strftime("%-I:%M %p")
+    
+    if len(parts) > 2:
+        menu_items = [item.strip() for item in parts[2].split(',')]
+    else:
+        menu_items = ["Balas", "Teruskan", "Salin", "Beri bintang", "Sematkan", "Laporkan", "Hapus"]
+
+    status = bot.reply_to(message, "Membuat gambar menu...")
+    try:
+        # Warna background (dark mode)
+        bg_color = (25, 30, 35)
+        bubble_color = (43, 43, 43)
+        text_color = (255, 255, 255)
+        grey_text = (150, 150, 150)
+
+        # Canvas HP 1080x1920
+        img = Image.new('RGB', (1080, 1920), color=bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Font fallback
+        try:
+            font_bubble = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 45)
+            font_menu = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 50)
+            font_time = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 35)
+        except:
+            font_bubble = font_menu = font_time = ImageFont.load_default()
+
+        # 1. Gambar Bubble Pesan
+        bubble_x, bubble_y = 50, 800
+        bubble_w, bubble_h = 650, 150
+        draw.rounded_rectangle([bubble_x, bubble_y, bubble_x + bubble_w, bubble_y + bubble_h], radius=30, fill=bubble_color)
+        
+        # Teks Bubble
+        draw.text((bubble_x + 30, bubble_y + 30), bubble_text, font=font_bubble, fill=text_color)
+        
+        # Waktu di Bubble
+        draw.text((bubble_x + 450, bubble_y + 80), time_text, font=font_time, fill=grey_text)
+
+        # 2. Gambar Emoji Reactions (kiri atas bubble)
+        reactions = "👍 ❤️ 😂 😮 😢 🙏 🎉"
+        draw.rounded_rectangle([bubble_x, bubble_y - 120, bubble_x + 550, bubble_y - 20], radius=50, fill=(40, 40, 40))
+        draw.text((bubble_x + 30, bubble_y - 100), reactions, font=font_bubble, fill=text_color)
+        
+        # Tombol Plus
+        draw.ellipse([bubble_x + 520, bubble_y - 120, bubble_x + 600, bubble_y - 20], fill=(60, 60, 60))
+        draw.text((bubble_x + 550, bubble_y - 90), "+", font=font_bubble, fill=text_color)
+
+        # 3. Gambar Context Menu (Tinggi menyesuaikan jumlah item)
+        menu_x, menu_y = 100, 1050
+        menu_w = 550
+        item_height = 95
+        menu_h = (len(menu_items) * item_height) + 20
+        
+        draw.rounded_rectangle([menu_x, menu_y, menu_x + menu_w, menu_y + menu_h], radius=30, fill=(40, 40, 40))
+
+        for i, label in enumerate(menu_items):
+            item_y = menu_y + 20 + (i * item_height)
+            draw.text((menu_x + 40, item_y), label, font=font_menu, fill=text_color)
+            
+            # Garis pemisah (kecuali item terakhir)
+            if i < len(menu_items) - 1:
+                draw.line([(menu_x + 30, item_y + 70), (menu_x + menu_w - 30, item_y + 70)], fill=(60, 60, 60), width=2)
+
+        temp_img = DOWNLOAD_DIR / f"menu_{message.chat.id}.jpg"
+        img.save(temp_img)
+
+        with open(temp_img, "rb") as f:
+            bot.send_photo(message.chat.id, f, caption="Fake Context Menu")
+        bot.delete_message(message.chat.id, status.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"Gagal bikin menu: {e}", message.chat.id, status.message_id)
+    finally:
+        if temp_img.exists(): temp_img.unlink(missing_ok=True)
+
 # --- UTILITY COMMANDS ---
 @bot.message_handler(commands=['remind'])
 def cmd_remind(message):
@@ -582,7 +666,7 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V32 - Quote & ASCII)...")
+    print("Bot running (V34 - Custom Fake Menu)...")
     while True:
         try:
             # Longgarkan timeout jadi 60 detik biar koneksi lebih stabil
