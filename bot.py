@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V34 - Custom Fake Menu)
+# bot.py — Bot Telegram Ultimate (V35 - Force Subscribe)
 import os
 import re
 import shutil
@@ -21,6 +21,12 @@ from telebot import types
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
+
+# --- PENGATURAN FORCE SUBSCRIBE ---
+# Ganti 'APT_LOOT' dengan username channel lu (tanpa @)
+CHANNEL_USERNAME = "@APT_LOOT" 
+CHANNEL_LINK = "https://t.me/APT_LOOT"
+
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "./downloads"))
 MAX_FILESIZE_MB = int(os.getenv("MAX_FILESIZE_MB", "50"))
 URL_RE = re.compile(r"https?://\S+")
@@ -39,6 +45,30 @@ cursor.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat
 cursor.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS watches (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, last_hash TEXT)")
 conn.commit()
+
+# --- FUNGSI CEK JOIN CHANNEL ---
+def is_joined(user_id):
+    # Kalau bot dijalanin di private chat, kita cek apakah dia udah join channel
+    try:
+        member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except Exception as e:
+        print(f"Error cek join: {e}")
+        # Kalau bot bukan admin di channel, bot gak bisa ngecek. 
+        # Terpaksa return False biar user diarahin join.
+        return False
+
+# --- MIDDLEWARE: CEK JOIN SEBELUM PROSES ---
+def check_subscription(message):
+    if is_joined(message.from_user.id):
+        return True
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔗 Join Channel", url=CHANNEL_LINK))
+    bot.reply_to(message, "🚀 **To use this bot, you must join our channel:**\n" + CHANNEL_LINK, reply_markup=markup, parse_mode="Markdown")
+    return False
 
 # --- QUEUE SYSTEM ---
 download_queue = []
@@ -196,6 +226,8 @@ def scrape_watch(chat_id, url, watch_id):
 # --- UI MENU ---
 @bot.message_handler(commands=['start', 'help'])
 def cmd_start(message):
+    if not check_subscription(message): return
+
     cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (message.chat.id,))
     conn.commit()
     
@@ -218,6 +250,9 @@ def cmd_start(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("menu_"))
 def callback_menu(call):
+    if not is_joined(call.from_user.id):
+        return bot.answer_callback_query(call.id, "Join channel dulu!", show_alert=True)
+
     cmd = call.data.replace("menu_", "")
     bot.answer_callback_query(call.id)
     
@@ -255,6 +290,9 @@ def callback_menu(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("tool_"))
 def callback_tool(call):
+    if not is_joined(call.from_user.id):
+        return bot.answer_callback_query(call.id, "Join channel dulu!", show_alert=True)
+
     tool = call.data.replace("tool_", "")
     bot.answer_callback_query(call.id)
     
@@ -279,6 +317,8 @@ def callback_tool(call):
 # --- TEXT HANDLERS ---
 @bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith('/'))
 def on_text(message):
+    if not check_subscription(message): return
+
     text = message.text
     if message.reply_to_message and "Tempel link" in message.reply_to_message.text:
         parent = message.reply_to_message.text
@@ -309,6 +349,9 @@ def on_text(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("dl_url_"))
 def callback_dl_url(call):
+    if not is_joined(call.from_user.id):
+        return bot.answer_callback_query(call.id, "Join channel dulu!", show_alert=True)
+
     try:
         data = call.data.split("|")
         kind = data[0].replace("dl_url_", "")
@@ -327,6 +370,8 @@ def callback_dl_url(call):
 # --- EKSTRAK AUDIO LOKAL ---
 @bot.message_handler(content_types=['video', 'video_note'])
 def handle_video_local(message):
+    if not check_subscription(message): return
+    
     status = bot.reply_to(message, "Mengekstrak audio...")
     file_info = bot.get_file(message.video.file_id)
     downloaded_file = bot.download_file(file_info.file_path)
@@ -349,6 +394,8 @@ def handle_video_local(message):
 # --- OCR LOKAL ---
 @bot.message_handler(content_types=['photo'])
 def handle_ocr(message):
+    if not check_subscription(message): return
+
     status = bot.reply_to(message, "Membaca teks (OCR)...")
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
@@ -376,6 +423,7 @@ def handle_ocr(message):
 # --- FITUR BARU: ASCII ART ---
 @bot.message_handler(commands=['ascii'])
 def cmd_ascii(message):
+    if not check_subscription(message): return
     if not message.reply_to_message or not message.reply_to_message.photo:
         return bot.reply_to(message, "Balas sebuah foto pakai command `/ascii`", parse_mode="Markdown")
     
@@ -410,6 +458,7 @@ def cmd_ascii(message):
 # --- FITUR BARU: FAKE QUOTE IMAGE ---
 @bot.message_handler(commands=['dl'])
 def cmd_dl(message):
+    if not check_subscription(message): return
     text = message.text.replace('/dl ', '')
     if not text: return bot.reply_to(message, "Format: `/dl <teks>`", parse_mode="Markdown")
     
@@ -468,6 +517,7 @@ def cmd_dl(message):
 # --- FITUR BARU: FAKE CONTEXT MENU (CUSTOM TEXT) ---
 @bot.message_handler(commands=['menu'])
 def cmd_fake_menu(message):
+    if not check_subscription(message): return
     text_input = message.text.replace('/menu ', '').strip()
     if not text_input: return bot.reply_to(message, "Format: `/menu <Teks> | <Waktu> | <Item1>, <Item2>`", parse_mode="Markdown")
 
@@ -552,6 +602,7 @@ def cmd_fake_menu(message):
 # --- UTILITY COMMANDS ---
 @bot.message_handler(commands=['remind'])
 def cmd_remind(message):
+    if not check_subscription(message): return
     try:
         parts = message.text.split(' ', 2)
         time_str, text = parts[1], parts[2]
@@ -568,6 +619,7 @@ def cmd_remind(message):
 
 @bot.message_handler(commands=['watch'])
 def cmd_watch(message):
+    if not check_subscription(message): return
     match = URL_RE.search(message.text)
     if not match: return bot.reply_to(message, "Format: /watch <url>")
     url = match.group(0)
@@ -585,6 +637,7 @@ def cmd_watch(message):
 
 @bot.message_handler(commands=['clear'])
 def cmd_clear(message):
+    if not check_subscription(message): return
     deleted_files = 0
     for f in DOWNLOAD_DIR.glob('*'):
         if f.is_file():
@@ -599,6 +652,8 @@ def cmd_clear(message):
 
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
+    # Khusus admin, gak perlu cek join (misal ID lu)
+    if message.chat.id != 123456789: return # Ganti 123456789 pake ID lu
     text = message.text.replace('/broadcast ', '')
     if not text: return bot.reply_to(message, "Format: /broadcast <pesan>")
     
@@ -614,6 +669,7 @@ def cmd_broadcast(message):
 
 @bot.message_handler(commands=['stats'])
 def cmd_stats(message):
+    if not check_subscription(message): return
     cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM history")
@@ -626,12 +682,14 @@ def cmd_id(message): bot.reply_to(message, f"ID: `{message.chat.id}`", parse_mod
 
 @bot.message_handler(commands=['ping'])
 def cmd_ping(message):
+    if not check_subscription(message): return
     start = time.time()
     msg = bot.reply_to(message, "Pong!")
     bot.edit_message_text(f"Pong! {int((time.time() - start) * 1000)}ms", message.chat.id, msg.message_id)
 
 @bot.message_handler(commands=['roll'])
 def cmd_roll(message):
+    if not check_subscription(message): return
     try:
         dice = message.text.split()[1]
         n, d = map(int, dice.split('d'))
@@ -640,12 +698,14 @@ def cmd_roll(message):
 
 @bot.message_handler(commands=['pick'])
 def cmd_pick(message):
+    if not check_subscription(message): return
     opts = message.text.replace('/pick ', '').split()
     if len(opts) < 2: return bot.reply_to(message, "Format: /pick a b")
     bot.reply_to(message, f"🎯 **{random.choice(opts)}**", parse_mode="Markdown")
 
 @bot.message_handler(commands=['genpass'])
 def cmd_genpass(message):
+    if not check_subscription(message): return
     try: length = int(message.text.split()[1])
     except: length = 16
     pwd = ''.join(secrets.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*") for _ in range(length))
@@ -653,6 +713,7 @@ def cmd_genpass(message):
 
 @bot.message_handler(commands=['note'])
 def cmd_note(message):
+    if not check_subscription(message): return
     text = message.text.replace('/note ', '')
     if not text: return bot.reply_to(message, "Format: /note <teks>")
     cursor.execute("INSERT INTO notes (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
@@ -660,16 +721,16 @@ def cmd_note(message):
 
 @bot.message_handler(commands=['todo'])
 def cmd_todo(message):
+    if not check_subscription(message): return
     text = message.text.replace('/todo ', '')
     if not text: return bot.reply_to(message, "Format: /todo <teks>")
     cursor.execute("INSERT INTO todos (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V34 - Custom Fake Menu)...")
+    print("Bot running (V35 - Force Subscribe)...")
     while True:
         try:
-            # Longgarkan timeout jadi 60 detik biar koneksi lebih stabil
             bot.infinity_polling(timeout=60, long_polling_timeout=60, none_stop=True)
         except Exception as e:
             print(f"Koneksi terputus: {e}")
