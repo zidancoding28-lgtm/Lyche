@@ -1,705 +1,227 @@
-# bot.py — Bot Telegram Pribadi (V37 - Locked to Owner)
+# bot.py — Bot Telegram Pribadi (V1 - Termux)
 import os
 import re
-import shutil
 import sqlite3
-import hashlib
-import secrets
 import random
 import time
-import threading
-import subprocess
-import json
-import socket
+import datetime
 import telebot
 import yt_dlp
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
-from pathlib import Path
 from telebot import types
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from pathlib import Path
 
-BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
+# --- PENGATURAN BOT ---
+BOT_TOKEN = "ISI_TOKEN_BOTFATHER_LO"
+OWNER_ID = 123456789  # Ganti pakai ID lo (dari @userinfobot)
 
-# --- PENGATURAN PEMILIK BOT ---
-OWNER_ID = 8901247073
-
-DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "./downloads"))
-MAX_FILESIZE_MB = int(os.getenv("MAX_FILESIZE_MB", "50"))
+DOWNLOAD_DIR = Path("./downloads")
+MAX_FILESIZE_MB = 50
 URL_RE = re.compile(r"https?://\S+")
 
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-# --- DB SETUP ---
-conn = sqlite3.connect("bot_data.db", check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, chat_id INTEGER, text TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY, chat_id INTEGER, text TEXT, done INTEGER DEFAULT 0)")
-cursor.execute("CREATE TABLE IF NOT EXISTS quotes (id INTEGER PRIMARY KEY, text TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS autoreplies (keyword TEXT PRIMARY KEY, reply TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-cursor.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER PRIMARY KEY)")
-cursor.execute("CREATE TABLE IF NOT EXISTS watches (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, last_hash TEXT)")
-conn.commit()
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- MIDDLEWARE: CEK APAKAH DIA OWNER ---
-def check_owner(message):
-    if message.from_user.id == OWNER_ID:
-        return True
-    
-    bot.reply_to(message, "⛔ **Akses Ditolak.** Bot ini bersifat pribadi.")
-    return False
-
-# --- QUEUE SYSTEM ---
-download_queue = []
-queue_lock = threading.Lock()
-
-def process_queue():
-    while True:
-        time.sleep(1)
-        with queue_lock:
-            if not download_queue:
-                continue
-            task = download_queue.pop(0)
-        _process_download(task['message'], task['kind'], task['url'], task['status_id'])
-
-threading.Thread(target=process_queue, daemon=True).start()
-
-# --- DOWNLOAD LOGIC ---
-def _hook_with_ids(d, chat_id, msg_id):
-    if d['status'] == 'downloading':
-        if 'total_bytes' in d and d['total_bytes'] > 0:
-            percent = int((d['downloaded_bytes'] / d['total_bytes']) * 100)
-        elif 'total_bytes_estimate' in d and d['total_bytes_estimate'] > 0:
-            percent = int((d['downloaded_bytes'] / d['total_bytes_estimate']) * 100)
-        else: percent = 0
-        if percent % 20 == 0:
-            bar = "█" * (percent // 10) + "░" * (10 - (percent // 10))
-            try: bot.edit_message_text(f"Downloading... [{bar}] {percent}%", chat_id, msg_id)
-            except: pass
-
-def _ydl_opts(kind: str, chat_id: int, msg_id: int) -> dict:
-    base = {
-        "outtmpl": str(DOWNLOAD_DIR / "%(title).80s-%(id)s.%(ext)s"),
-        "restrictfilenames": True,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "max_filesize": MAX_FILESIZE_MB * 1024 * 1024,
-        "progress_hooks": [lambda d: _hook_with_ids(d, chat_id, msg_id)],
-        "socket_timeout": 15, 
-        "retries": 5,
-        "source_address": "0.0.0.0"
-    }
-    if kind == "video": base.update(format="bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", merge_output_format="mp4")
-    elif kind == "audio": base.update(format="bestaudio/best", postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}])
-    elif kind == "photo": base.update(format="bestaudio/best", skip_download=True, writethumbnail=True)
-    return base
-
-def _pick_thumb(info: dict) -> str | None:
-    thumbs = info.get("thumbnails") or []
-    imgs = [t for t in thumbs if t.get("url")]
-    if not imgs: return None
-    imgs.sort(key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
-    return imgs[-1]["url"]
-
-def _sync_download(url: str, kind: str, chat_id: int, msg_id: int) -> dict | None:
-    try:
-        with yt_dlp.YoutubeDL(_ydl_opts(kind, chat_id, msg_id)) as ydl:
-            info = ydl.extract_info(url, download=(kind != "photo"))
-            if info is None: return None
-            
-            raw_title = info.get("title", "Unknown")
-            artist = info.get("artist") or info.get("uploader") or info.get("channel") or ""
-            
-            if artist and artist.lower() not in raw_title.lower():
-                clean_name = f"{artist} - {raw_title}"
-            else:
-                clean_name = raw_title
-                
-            clean_name = re.sub(r'[\\/*?:"<>|]', "", clean_name).strip()
-            clean_name = clean_name[:100]
-
-            if kind == "photo":
-                thumb_url = _pick_thumb(info)
-                if not thumb_url: return None
-                out = DOWNLOAD_DIR / f"{clean_name}.jpg"
-                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as d:
-                    d.download([thumb_url])
-                    for cand in DOWNLOAD_DIR.glob(f"{info.get('id', '')}*"):
-                        if cand.is_file() and cand != out:
-                            shutil.move(str(cand), str(out))
-                            break
-                return {"path": out, "title": clean_name} if out.exists() else None
-
-            path = Path(ydl.prepare_filename(info))
-            if not path.exists():
-                stem = path.with_suffix("")
-                exts = (".mp4", ".mkv", ".webm") if kind == "video" else (".mp3", ".m4a", ".opus")
-                for ext in exts:
-                    cand = stem.with_suffix(ext)
-                    if cand.exists(): path = cand; break
-                else: return None
-            
-            new_path = DOWNLOAD_DIR / f"{clean_name}{path.suffix}"
-            try:
-                path.rename(new_path)
-                path = new_path
-            except: pass
-            return {"path": path, "title": clean_name}
-    except Exception as e:
-        print(f"download error ({kind}): {e}")
-        return None
-
-def _process_download(message, kind: str, url: str, status_msg_id: int):
-    res = _sync_download(url, kind, message.chat.id, status_msg_id)
-    if res is None: 
-        return bot.edit_message_text("Gagal download. Jaringan diblokir / link invalid.", message.chat.id, status_msg_id)
-    
-    path = res["path"]
-    title = res["title"]
-    
-    size_mb = path.stat().st_size / (1024 * 1024)
-    bot.edit_message_text(f"Uploading ({size_mb:.1f}MB)...", message.chat.id, status_msg_id)
-    
-    try:
-        with open(path, "rb") as f:
-            if kind == "video":
-                if size_mb > 50: bot.send_document(message.chat.id, f, caption=title, timeout=120)
-                else: bot.send_video(message.chat.id, f, caption=title, supports_streaming=True, timeout=120)
-            elif kind == "audio": bot.send_audio(message.chat.id, f, title=title, timeout=120)
-            else: bot.send_photo(message.chat.id, f, caption=title, timeout=120)
-        bot.delete_message(message.chat.id, status_msg_id)
-    except Exception as e:
-        bot.edit_message_text(f"Upload gagal: {e}", message.chat.id, status_msg_id)
-    finally: path.unlink(missing_ok=True)
-
-# --- REMINDER SYSTEM ---
-def set_reminder(chat_id, delay, text):
-    def send_reminder():
-        try: bot.send_message(chat_id, f"⏰ **PENGINGAT:** {text}", parse_mode="Markdown")
-        except: pass
-    t = threading.Timer(delay, send_reminder)
-    t.start()
-
-# --- SCRAPER SYSTEM ---
-def scrape_watch(chat_id, url, watch_id):
-    while True:
-        time.sleep(600) 
-        try:
-            cursor.execute("SELECT last_hash FROM watches WHERE id=?", (watch_id,))
-            row = cursor.fetchone()
-            if not row: break 
-            last_hash = row[0]
-            
-            res = requests.get(url, timeout=10)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            current_text = soup.get_text()
-            current_hash = hashlib.md5(current_text.encode()).hexdigest()
-            
-            if current_hash != last_hash:
-                bot.send_message(chat_id, f"🔔 **PERUBAHAN TERDETEKSI:**\n{url}")
-                cursor.execute("UPDATE watches SET last_hash=? WHERE id=?", (current_hash, watch_id))
-                conn.commit()
-        except: pass
-
-# --- UI MENU ---
-@bot.message_handler(commands=['start', 'help'])
-def cmd_start(message):
-    if not check_owner(message): return
-
-    cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (message.chat.id,))
+# --- DATABASE (SQLite) ---
+DB_PATH = "bot_data.db"
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, joined_at TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS quotes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT)''')
+    # Isi quote default kalau kosong
+    c.execute('SELECT COUNT(*) FROM quotes')
+    if c.fetchone()[0] == 0:
+        default_quotes = [
+            "yang diam lebih berbahaya dari yang bicara.",
+            "kekuatan sejati tidak butuh penonton.",
+            "kegagalan adalah data, bukan identitas.",
+            "satu langkah benar lebih berharga dari seribu rencana indah."
+        ]
+        for q in default_quotes:
+            c.execute('INSERT INTO quotes (text) VALUES (?)', (q,))
     conn.commit()
-    
+    conn.close()
+
+def add_user(user_id, username):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO users (id, username, joined_at) VALUES (?, ?, ?)', 
+              (user_id, username, datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_random_quote():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT text FROM quotes ORDER BY RANDOM() LIMIT 1')
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res else "belum ada kata-kata."
+
+# --- MENU INLINE ---
+def main_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_dl = types.InlineKeyboardButton("🎬 Download", callback_data="menu_dl")
+    btn_anim = types.InlineKeyboardButton("✨ Animasi", callback_data="menu_anim")
+    btn_quote = types.InlineKeyboardButton("💬 Kata-kata", callback_data="menu_quote")
+    btn_sys = types.InlineKeyboardButton("📊 Sistem", callback_data="menu_sys")
+    markup.add(btn_dl, btn_anim, btn_quote, btn_sys)
+    return markup
+
+def back_menu():
     markup = types.InlineKeyboardMarkup()
-    markup.row(
-        types.InlineKeyboardButton("📥 Video", callback_data="menu_video"),
-        types.InlineKeyboardButton("🎵 Audio", callback_data="menu_audio"),
-        types.InlineKeyboardButton("🖼 Foto", callback_data="menu_photo")
+    markup.add(types.InlineKeyboardButton("⬅️ Kembali ke Menu", callback_data="menu_main"))
+    return markup
+
+# --- HANDLER PERINTAH DASAR ---
+@bot.message_handler(commands=['start', 'menu'])
+def send_welcome(message):
+    add_user(message.from_user.id, message.from_user.username)
+    
+    # Cek apakah yang chat adalah owner (opsional)
+    # if message.from_user.id != OWNER_ID: return bot.reply_to(message, "Akses ditolak.")
+    
+    text = f"*Halo {message.from_user.first_name}!*\nID lo: `{message.from_user.id}`\n\nSilakan pilih menu di bawah:"
+    bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=main_menu())
+
+@bot.message_handler(commands=['help'])
+def send_help(message):
+    text = (
+        "*Perintah Tersedia:*\n"
+        "/start /menu — Tampilkan menu\n"
+        "/quote — Kata-kata random\n"
+        "/sysinfo — Info server bot\n"
+        "/ping — Cek latency\n\n"
+        "*Download:*\n"
+        "Kirim link video/audio langsung ke chat, atau ketik `/dl <url>`."
     )
-    markup.row(
-        types.InlineKeyboardButton("📝 Catatan", callback_data="menu_notes"),
-        types.InlineKeyboardButton("📋 To-do", callback_data="menu_todos"),
-        types.InlineKeyboardButton("💬 Quote", callback_data="menu_quote")
-    )
-    markup.row(
-        types.InlineKeyboardButton("🕒 History", callback_data="menu_history"),
-        types.InlineKeyboardButton("⚙️ Alat", callback_data="menu_tools")
-    )
-    bot.reply_to(message, "Silakan pilih menu di bawah:", reply_markup=markup)
+    bot.reply_to(message, text, parse_mode='Markdown')
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("menu_"))
-def callback_menu(call):
-    if call.from_user.id != OWNER_ID:
-        return bot.answer_callback_query(call.id, "Akses Ditolak.", show_alert=True)
-
-    cmd = call.data.replace("menu_", "")
-    bot.answer_callback_query(call.id)
+# --- HANDLER CALLBACK (TOMBOL MENU) ---
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    if call.data == "menu_main":
+        bot.edit_message_text("Silakan pilih menu:", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
     
-    if cmd in ["video", "audio", "photo"]:
-        bot.send_message(call.message.chat.id, f"Tempel link {cmd} sekarang:", reply_markup=types.ForceReply(selective=True))
-    elif cmd == "notes":
-        cursor.execute("SELECT id, text FROM notes WHERE chat_id=?", (call.message.chat.id,))
-        rows = cursor.fetchall()
-        text = "📝 **Catatan:**\n\n" + "\n".join([f"`{r[0]}`. {r[1]}" for r in rows]) if rows else "Belum ada catatan."
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back")))
-    elif cmd == "todos":
-        cursor.execute("SELECT id, text, done FROM todos WHERE chat_id=?", (call.message.chat.id,))
-        rows = cursor.fetchall()
-        text = "📋 **To-do:**\n\n" + "\n".join([f"{'✅' if r[2] else '⬜'} `{r[0]}`. {r[1]}" for r in rows]) if rows else "Belum ada to-do."
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back")))
-    elif cmd == "quote":
-        cursor.execute("SELECT text FROM quotes ORDER BY RANDOM() LIMIT 1")
-        res = cursor.fetchone()
-        text = f"💬 \"{res[0]}\"" if res else "Belum ada quote."
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back")))
-    elif cmd == "history":
-        cursor.execute("SELECT url FROM history WHERE chat_id=? ORDER BY id DESC LIMIT 5", (call.message.chat.id,))
-        rows = cursor.fetchall()
-        text = "🕒 **History:**\n\n" + "\n".join([f"- {r[0]}" for r in rows]) if rows else "Belum ada history."
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back")))
-    elif cmd == "tools":
-        markup = types.InlineKeyboardMarkup()
-        markup.row(types.InlineKeyboardButton("🎲 Roll Dadu", callback_data="tool_roll"), types.InlineKeyboardButton("🎯 Pick", callback_data="tool_pick"))
-        markup.row(types.InlineKeyboardButton("🔑 Genpass", callback_data="tool_genpass"), types.InlineKeyboardButton("🕒 Time", callback_data="tool_time"))
-        markup.row(types.InlineKeyboardButton("🗑 Bersihkan Cache", callback_data="tool_clear"))
-        markup.row(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back"))
-        bot.edit_message_text("⚙️ **Menu Alat:**", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
-    elif cmd == "back":
-        cmd_start(call.message)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("tool_"))
-def callback_tool(call):
-    if call.from_user.id != OWNER_ID:
-        return bot.answer_callback_query(call.id, "Akses Ditolak.", show_alert=True)
-
-    tool = call.data.replace("tool_", "")
-    bot.answer_callback_query(call.id)
+    elif call.data == "menu_dl":
+        text = "*Menu Download*\nKirim link langsung ke chat, atau ketik:\n`/dl <url>`"
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=back_menu())
     
-    if tool == "time": bot.send_message(call.message.chat.id, f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    elif tool == "roll": bot.send_message(call.message.chat.id, "🎲 Ketik: `/roll 2d6`", parse_mode="Markdown")
-    elif tool == "pick": bot.send_message(call.message.chat.id, "🎯 Ketik: `/pick opsi1 opsi2`", parse_mode="Markdown")
-    elif tool == "genpass": bot.send_message(call.message.chat.id, "🔑 Ketik: `/genpass 16`", parse_mode="Markdown")
-    elif tool == "clear":
-        deleted_files = 0
-        for f in DOWNLOAD_DIR.glob('*'):
-            if f.is_file():
-                try:
-                    f.unlink()
-                    deleted_files += 1
-                except: pass
-        
-        cursor.execute("DELETE FROM history WHERE chat_id=?", (call.message.chat.id,))
-        conn.commit()
-        
-        bot.edit_message_text(f"🗑 **Cache dibersihkan!**\n- {deleted_files} file sampah dihapus.\n- Riwayat download dikosongkan.", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back")))
+    elif call.data == "menu_anim":
+        # Animasi loading
+        msg = bot.edit_message_text("⠋ Memproses...", call.message.chat.id, call.message.message_id)
+        spinners = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+        for i in range(5):
+            for spin in spinners:
+                bot.edit_message_text(f"{spin} Memproses...", call.message.chat.id, msg.message_id)
+                time.sleep(0.2)
+        bot.edit_message_text("✔ Selesai!", call.message.chat.id, msg.message_id, reply_markup=back_menu())
+    
+    elif call.data == "menu_quote":
+        q = get_random_quote()
+        bot.edit_message_text(f"_{q}_", call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=back_menu())
+    
+    elif call.data == "menu_sys":
+        text = "*Sistem Bot*\nStatus: Online\nServer: Termux (Android)"
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=back_menu())
 
-# --- TEXT HANDLERS ---
-@bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith('/'))
-def on_text(message):
-    if not check_owner(message): return
+# --- DOWNLOADER (YT-DLP) ---
+def progress_hook(d, chat_id, msg_id):
+    if d['status'] == 'downloading':
+        try:
+            p = d.get('_percent_str', '0%').strip()
+            speed = d.get('_speed_str', 'N/A').strip()
+            bot.edit_message_text(f"📥 Mengunduh... {p} (Kecepatan: {speed})", chat_id, msg_id)
+        except:
+            pass
+    elif d['status'] == 'finished':
+        bot.edit_message_text("⚙️ Memproses file...", chat_id, msg_id)
 
-    text = message.text
-    if message.reply_to_message and "Tempel link" in message.reply_to_message.text:
-        parent = message.reply_to_message.text
-        match = URL_RE.search(text)
-        if not match: return bot.reply_to(message, "Bukan link valid.")
-        
-        url = match.group(0)
-        cursor.execute("INSERT INTO history (chat_id, url) VALUES (?, ?)", (message.chat.id, url))
-        conn.commit()
-        
-        kind = "video" if "video" in parent else ("audio" if "audio" in parent else "photo")
-        status = bot.reply_to(message, f"Masuk antrean ({kind})...")
-        
-        with queue_lock:
-            download_queue.append({'message': message, 'kind': kind, 'url': url, 'status_id': status.message_id})
-        return
-
-    match = URL_RE.search(text)
-    if match:
-        url = match.group(0)
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("📥 Video", callback_data=f"dl_url_video|{url}"),
-            types.InlineKeyboardButton("🎵 Audio", callback_data=f"dl_url_audio|{url}"),
-            types.InlineKeyboardButton("🖼 Foto", callback_data="menu_photo")
-        )
-        return bot.reply_to(message, "Mau jadi apa?", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("dl_url_"))
-def callback_dl_url(call):
-    if call.from_user.id != OWNER_ID:
-        return bot.answer_callback_query(call.id, "Akses Ditolak.", show_alert=True)
+def process_download(message, url, mode="video"):
+    chat_id = message.chat.id
+    msg = bot.reply_to(message, "🔍 Menganalisa link...")
+    
+    outtmpl = str(DOWNLOAD_DIR / f"%(title)s_{int(time.time())}.%(ext)s")
+    
+    if mode == "audio":
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': outtmpl,
+            'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}],
+            'progress_hooks': [lambda d: progress_hook(d, chat_id, msg.message_id)],
+            'quiet': True,
+            'noplaylist': True
+        }
+    else:
+        ydl_opts = {
+            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            'outtmpl': outtmpl,
+            'progress_hooks': [lambda d: progress_hook(d, chat_id, msg.message_id)],
+            'quiet': True,
+            'noplaylist': True
+        }
 
     try:
-        data = call.data.split("|")
-        kind = data[0].replace("dl_url_", "")
-        url = data[1]
-        bot.answer_callback_query(call.id, f"Masuk antrean...")
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        
-        cursor.execute("INSERT INTO history (chat_id, url) VALUES (?, ?)", (call.message.chat.id, url))
-        conn.commit()
-        
-        status = bot.send_message(call.message.chat.id, f"Masuk antrean ({kind})...")
-        with queue_lock:
-            download_queue.append({'message': call.message, 'kind': kind, 'url': url, 'status_id': status.message_id})
-    except Exception as e: bot.send_message(call.message.chat.id, f"Error: {e}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filepath = ydl.prepare_filename(info)
+            
+            # YT-DLP kadang mengubah ekstensi (misal .webm jadi .mp3 atau .mp4)
+            if mode == "audio":
+                filepath = str(Path(filepath).with_suffix('.mp3'))
+            else:
+                filepath = str(Path(filepath).with_suffix('.mp4'))
+                
+            if not os.path.exists(filepath):
+                # Cari file terbaru di folder kalau nama beda
+                files = sorted(DOWNLOAD_DIR.glob("*"), key=os.path.getmtime, reverse=True)
+                if files: filepath = str(files[0])
 
-# --- EKSTRAK AUDIO LOKAL ---
-@bot.message_handler(content_types=['video', 'video_note'])
-def handle_video_local(message):
-    if not check_owner(message): return
-    
-    status = bot.reply_to(message, "Mengekstrak audio...")
-    file_info = bot.get_file(message.video.file_id)
-    downloaded_file = bot.download_file(file_info.file_path)
-    
-    temp_vid = DOWNLOAD_DIR / f"temp_{message.video.file_id}.mp4"
-    temp_mp3 = DOWNLOAD_DIR / f"audio_{message.video.file_id}.mp3"
-    with open(temp_vid, 'wb') as f: f.write(downloaded_file)
-    
-    try:
-        subprocess.run(['ffmpeg', '-y', '-i', str(temp_vid), '-q:a', '0', '-map', 'a', str(temp_mp3)], check=True, capture_output=True)
-        with open(temp_mp3, 'rb') as f:
-            bot.send_audio(message.chat.id, f, title="Audio Extract")
-        bot.delete_message(message.chat.id, status.message_id)
+        size_mb = os.path.getsize(filepath) / (1024 * 1024)
+        if size_mb > MAX_FILESIZE_MB:
+            bot.edit_message_text(f"❌ File terlalu besar ({size_mb:.1f} MB). Limit Telegram 50 MB.", chat_id, msg.message_id)
+            os.remove(filepath)
+            return
+
+        bot.edit_message_text("📤 Mengirim file...", chat_id, msg.message_id)
+        
+        with open(filepath, 'rb') as f:
+            if mode == "audio":
+                bot.send_audio(chat_id, f, title=os.path.basename(filepath))
+            else:
+                bot.send_video(chat_id, f, supports_streaming=True)
+                
+        bot.delete_message(chat_id, msg.message_id)
+        
     except Exception as e:
-        bot.edit_message_text(f"Gagal ekstrak: {e}", message.chat.id, status.message_id)
+        bot.edit_message_text(f"❌ Gagal: {str(e)[:100]}", chat_id, msg.message_id)
     finally:
-        temp_vid.unlink(missing_ok=True)
-        temp_mp3.unlink(missing_ok=True)
+        if 'filepath' in locals() and os.path.exists(filepath):
+            os.remove(filepath)
 
-# --- OCR LOKAL ---
-@bot.message_handler(content_types=['photo'])
-def handle_ocr(message):
-    if not check_owner(message): return
-
-    status = bot.reply_to(message, "Membaca teks (OCR)...")
-    try:
-        file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        temp_img = DOWNLOAD_DIR / f"ocr_{message.photo[-1].file_id}.jpg"
-        temp_upscaled = DOWNLOAD_DIR / f"ocr_up_{message.photo[-1].file_id}.jpg"
-        
-        with open(temp_img, 'wb') as f: f.write(downloaded_file)
-        
-        subprocess.run(['ffmpeg', '-y', '-i', str(temp_img), '-vf', 'scale=iw*2:ih*2', str(temp_upscaled)], check=True, capture_output=True)
-        
-        result = subprocess.run(['tesseract', str(temp_upscaled), 'stdout', '-l', 'eng'], capture_output=True, text=True)
-        text = result.stdout.strip()
-        
-        if text: 
-            bot.edit_message_text(f"📄 **Hasil OCR:**\n\n{text}", message.chat.id, status.message_id)
-        else: 
-            bot.edit_message_text("Teks tidak terdeteksi. Pastiin gambar gak burem.", message.chat.id, status.message_id)
-    except Exception as e:
-        bot.edit_message_text(f"Gagal OCR: {e}", message.chat.id, status.message_id)
-    finally:
-        temp_img.unlink(missing_ok=True)
-        temp_upscaled.unlink(missing_ok=True)
-
-# --- FITUR BARU: ASCII ART ---
-@bot.message_handler(commands=['ascii'])
-def cmd_ascii(message):
-    if not check_owner(message): return
-    if not message.reply_to_message or not message.reply_to_message.photo:
-        return bot.reply_to(message, "Balas sebuah foto pakai command `/ascii`", parse_mode="Markdown")
-    
-    status = bot.reply_to(message, "Mengubah gambar ke ASCII...")
-    try:
-        file_info = bot.get_file(message.reply_to_message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        temp_img = DOWNLOAD_DIR / f"ascii_{message.reply_to_message.photo[-1].file_id}.jpg"
-        
-        with open(temp_img, 'wb') as f: f.write(downloaded_file)
-        
-        img = Image.open(temp_img).convert('L') # Grayscale
-        width, height = img.size
-        new_width = 50
-        new_height = int((new_width * height) / width * 0.5)
-        img = img.resize((new_width, new_height))
-        
-        chars = ["@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."]
-        pixels = img.getdata()
-        ascii_str = "".join([chars[pixel // 25] for pixel in pixels])
-        ascii_img = "\n".join([ascii_str[i:(i+new_width)] for i in range(0, len(ascii_str), new_width)])
-        
-        with open(temp_img, "w") as f: f.write(ascii_img)
-        with open(temp_img, "rb") as f:
-            bot.send_document(message.chat.id, f, caption="Hasil ASCII Art")
-        bot.delete_message(message.chat.id, status.message_id)
-    except Exception as e:
-        bot.edit_message_text(f"Gagal bikin ASCII: {e}", message.chat.id, status.message_id)
-    finally:
-        temp_img.unlink(missing_ok=True)
-
-# --- FITUR BARU: FAKE QUOTE IMAGE ---
 @bot.message_handler(commands=['dl'])
 def cmd_dl(message):
-    if not check_owner(message): return
-    text = message.text.replace('/dl ', '')
-    if not text: return bot.reply_to(message, "Format: `/dl <teks>`", parse_mode="Markdown")
-    
-    status = bot.reply_to(message, "Membuat gambar quote...")
-    try:
-        # Canvas 800x800 (background gelap)
-        img = Image.new('RGB', (800, 800), color=(25, 25, 25))
-        draw = ImageDraw.Draw(img)
-        
-        # Coba pakai font bawaan, atau fallback
-        try:
-            font = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 40)
-        except:
-            font = ImageFont.load_default()
-            
-        # Bungkus teks
-        margin = 50
-        words = text.split()
-        lines = []
-        current_line = ""
-        for word in words:
-            test_line = current_line + word + " "
-            bbox = draw.textbbox((0, 0), test_line, font=font)
-            if bbox[2] - bbox[0] < (800 - margin*2):
-                current_line = test_line
-            else:
-                lines.append(current_line)
-                current_line = word + " "
-        lines.append(current_line)
-        
-        # Render teks ke tengah
-        total_height = len(lines) * 50
-        y = (800 - total_height) / 2
-        for line in lines:
-            bbox = draw.textbbox((0, 0), line.strip(), font=font)
-            w = bbox[2] - bbox[0]
-            x = (800 - w) / 2
-            draw.text((x, y), line.strip(), font=font, fill=(255, 255, 255))
-            y += 50
-            
-        # Tanda kutip besar
-        draw.text((50, 50), '"', font=font, fill=(100, 100, 100))
-        draw.text((720, 700), '"', font=font, fill=(100, 100, 100))
-            
-        temp_img = DOWNLOAD_DIR / f"quote_{message.chat.id}.jpg"
-        img.save(temp_img)
-        
-        with open(temp_img, "rb") as f:
-            bot.send_photo(message.chat.id, f, caption="Quote generated.")
-        bot.delete_message(message.chat.id, status.message_id)
-    except Exception as e:
-        bot.edit_message_text(f"Gagal bikin quote: {e}", message.chat.id, status.message_id)
-    finally:
-        temp_img.unlink(missing_ok=True)
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Pakai: `/dl <url>`", parse_mode='Markdown')
+    process_download(message, args[1].strip(), mode="video")
 
-# --- FITUR BARU: FAKE CONTEXT MENU (CUSTOM TEXT) ---
-@bot.message_handler(commands=['menu'])
-def cmd_fake_menu(message):
-    if not check_owner(message): return
-    text_input = message.text.replace('/menu ', '').strip()
-    if not text_input: return bot.reply_to(message, "Format: `/menu <Teks> | <Waktu> | <Item1>, <Item2>`", parse_mode="Markdown")
+@bot.message_handler(commands=['dla'])
+def cmd_dla(message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Pakai: `/dla <url>`", parse_mode='Markdown')
+    process_download(message, args[1].strip(), mode="audio")
 
-    # Parsing input pake pemisah '|'
-    parts = [p.strip() for p in text_input.split('|')]
-    
-    bubble_text = parts[0] if len(parts) > 0 else "Halo"
-    time_text = parts[1] if len(parts) > 1 else datetime.now().strftime("%-I:%M %p")
-    
-    if len(parts) > 2:
-        menu_items = [item.strip() for item in parts[2].split(',')]
-    else:
-        menu_items = ["Balas", "Teruskan", "Salin", "Beri bintang", "Sematkan", "Laporkan", "Hapus"]
+# --- HANDLER PESAN LINK OTOMATIS ---
+@bot.message_handler(func=lambda message: URL_RE.search(message.text) is not None)
+def handle_link(message):
+    url = URL_RE.search(message.text).group(0)
+    process_download(message, url, mode="video")
 
-    status = bot.reply_to(message, "Membuat gambar menu...")
-    try:
-        # Warna background (dark mode)
-        bg_color = (25, 30, 35)
-        bubble_color = (43, 43, 43)
-        text_color = (255, 255, 255)
-        grey_text = (150, 150, 150)
-
-        # Canvas HP 1080x1920
-        img = Image.new('RGB', (1080, 1920), color=bg_color)
-        draw = ImageDraw.Draw(img)
-
-        # Font fallback
-        try:
-            font_bubble = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 45)
-            font_menu = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 50)
-            font_time = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 35)
-        except:
-            font_bubble = font_menu = font_time = ImageFont.load_default()
-
-        # 1. Gambar Bubble Pesan
-        bubble_x, bubble_y = 50, 800
-        bubble_w, bubble_h = 650, 150
-        draw.rounded_rectangle([bubble_x, bubble_y, bubble_x + bubble_w, bubble_y + bubble_h], radius=30, fill=bubble_color)
-        
-        # Teks Bubble
-        draw.text((bubble_x + 30, bubble_y + 30), bubble_text, font=font_bubble, fill=text_color)
-        
-        # Waktu di Bubble
-        draw.text((bubble_x + 450, bubble_y + 80), time_text, font=font_time, fill=grey_text)
-
-        # 2. Gambar Emoji Reactions (kiri atas bubble)
-        reactions = "👍 ❤️ 😂 😮 😢 🙏 🎉"
-        draw.rounded_rectangle([bubble_x, bubble_y - 120, bubble_x + 550, bubble_y - 20], radius=50, fill=(40, 40, 40))
-        draw.text((bubble_x + 30, bubble_y - 100), reactions, font=font_bubble, fill=text_color)
-        
-        # Tombol Plus
-        draw.ellipse([bubble_x + 520, bubble_y - 120, bubble_x + 600, bubble_y - 20], fill=(60, 60, 60))
-        draw.text((bubble_x + 550, bubble_y - 90), "+", font=font_bubble, fill=text_color)
-
-        # 3. Gambar Context Menu (Tinggi menyesuaikan jumlah item)
-        menu_x, menu_y = 100, 1050
-        menu_w = 550
-        item_height = 95
-        menu_h = (len(menu_items) * item_height) + 20
-        
-        draw.rounded_rectangle([menu_x, menu_y, menu_x + menu_w, menu_y + menu_h], radius=30, fill=(40, 40, 40))
-
-        for i, label in enumerate(menu_items):
-            item_y = menu_y + 20 + (i * item_height)
-            draw.text((menu_x + 40, item_y), label, font=font_menu, fill=text_color)
-            
-            # Garis pemisah (kecuali item terakhir)
-            if i < len(menu_items) - 1:
-                draw.line([(menu_x + 30, item_y + 70), (menu_x + menu_w - 30, item_y + 70)], fill=(60, 60, 60), width=2)
-
-        temp_img = DOWNLOAD_DIR / f"menu_{message.chat.id}.jpg"
-        img.save(temp_img)
-
-        with open(temp_img, "rb") as f:
-            bot.send_photo(message.chat.id, f, caption="Fake Context Menu")
-        bot.delete_message(message.chat.id, status.message_id)
-    except Exception as e:
-        bot.edit_message_text(f"Gagal bikin menu: {e}", message.chat.id, status.message_id)
-    finally:
-        if temp_img.exists(): temp_img.unlink(missing_ok=True)
-
-# --- UTILITY COMMANDS ---
-@bot.message_handler(commands=['remind'])
-def cmd_remind(message):
-    if not check_owner(message): return
-    try:
-        parts = message.text.split(' ', 2)
-        time_str, text = parts[1], parts[2]
-        unit = time_str[-1].lower()
-        val = int(time_str[:-1])
-        
-        if unit == 'm': delay = val * 60
-        elif unit == 'h': delay = val * 3600
-        else: return bot.reply_to(message, "Format: /remind 10m <teks>")
-        
-        set_reminder(message.chat.id, delay, text)
-        bot.reply_to(message, f"⏰ Pengingat disetel dalam {time_str}.")
-    except: bot.reply_to(message, "Format: /remind 10m <teks>")
-
-@bot.message_handler(commands=['watch'])
-def cmd_watch(message):
-    if not check_owner(message): return
-    match = URL_RE.search(message.text)
-    if not match: return bot.reply_to(message, "Format: /watch <url>")
-    url = match.group(0)
-    
-    res = requests.get(url, timeout=10)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    current_hash = hashlib.md5(soup.get_text().encode()).hexdigest()
-    
-    cursor.execute("INSERT INTO watches (chat_id, url, last_hash) VALUES (?, ?, ?)", (message.chat.id, url, current_hash))
-    conn.commit()
-    watch_id = cursor.lastrowid
-    
-    threading.Thread(target=scrape_watch, args=(message.chat.id, url, watch_id), daemon=True).start()
-    bot.reply_to(message, "✅ Memantau halaman. Akan diberitahu jika ada perubahan.")
-
-@bot.message_handler(commands=['clear'])
-def cmd_clear(message):
-    if not check_owner(message): return
-    deleted_files = 0
-    for f in DOWNLOAD_DIR.glob('*'):
-        if f.is_file():
-            try:
-                f.unlink()
-                deleted_files += 1
-            except: pass
-            
-    cursor.execute("DELETE FROM history WHERE chat_id=?", (message.chat.id,))
-    conn.commit()
-    bot.reply_to(message, f"🗑 **Cache dibersihkan!**\n- {deleted_files} file sampah dihapus.\n- Riwayat download dikosongkan.", parse_mode="Markdown")
-
-@bot.message_handler(commands=['stats'])
-def cmd_stats(message):
-    if not check_owner(message): return
-    
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM history")
-    downloads = cursor.fetchone()[0]
-    total_size = sum(f.stat().st_size for f in DOWNLOAD_DIR.glob('**/*') if f.is_file()) / (1024 * 1024)
-    bot.reply_to(message, f"📊 **Stats Bot:**\nUser: {users}\nTotal Download: {downloads}\nDisk: {total_size:.1f} MB")
-
-@bot.message_handler(commands=['id'])
-def cmd_id(message): bot.reply_to(message, f"ID: `{message.chat.id}`", parse_mode="Markdown")
-
-@bot.message_handler(commands=['ping'])
-def cmd_ping(message):
-    if not check_owner(message): return
-    start = time.time()
-    msg = bot.reply_to(message, "Pong!")
-    bot.edit_message_text(f"Pong! {int((time.time() - start) * 1000)}ms", message.chat.id, msg.message_id)
-
-@bot.message_handler(commands=['roll'])
-def cmd_roll(message):
-    if not check_owner(message): return
-    try:
-        dice = message.text.split()[1]
-        n, d = map(int, dice.split('d'))
-        bot.reply_to(message, f"🎲 Hasil: **{sum(random.randint(1, d) for _ in range(n))}**", parse_mode="Markdown")
-    except: bot.reply_to(message, "Format: /roll 2d6")
-
-@bot.message_handler(commands=['pick'])
-def cmd_pick(message):
-    if not check_owner(message): return
-    opts = message.text.replace('/pick ', '').split()
-    if len(opts) < 2: return bot.reply_to(message, "Format: /pick a b")
-    bot.reply_to(message, f"🎯 **{random.choice(opts)}**", parse_mode="Markdown")
-
-@bot.message_handler(commands=['genpass'])
-def cmd_genpass(message):
-    if not check_owner(message): return
-    try: length = int(message.text.split()[1])
-    except: length = 16
-    pwd = ''.join(secrets.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*") for _ in range(length))
-    bot.reply_to(message, f"`{pwd}`", parse_mode="Markdown")
-
-@bot.message_handler(commands=['note'])
-def cmd_note(message):
-    if not check_owner(message): return
-    text = message.text.replace('/note ', '')
-    if not text: return bot.reply_to(message, "Format: /note <teks>")
-    cursor.execute("INSERT INTO notes (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
-    bot.reply_to(message, "✅ Catatan disimpan.")
-
-@bot.message_handler(commands=['todo'])
-def cmd_todo(message):
-    if not check_owner(message): return
-    text = message.text.replace('/todo ', '')
-    if not text: return bot.reply_to(message, "Format: /todo <teks>")
-    cursor.execute("INSERT INTO todos (chat_id, text) VALUES (?, ?)", (message.chat.id, text)); conn.commit()
-    bot.reply_to(message, "✅ To-do ditambahkan.")
-
+# --- MAIN ---
 if __name__ == "__main__":
-    print("Bot running (V37 - Locked to Owner)...")
-    while True:
-        try:
-            # Longgarkan timeout jadi 60 detik biar koneksi lebih stabil
-            bot.infinity_polling(timeout=60, long_polling_timeout=60, none_stop=True)
-        except Exception as e:
-            print(f"Koneksi terputus: {e}")
-            print("Nyoba nyambung lagi dalam 10 detik...")
-            time.sleep(10)
+    init_db()
+    print("Bot berjalan...")
+    bot.infinity_polling()
