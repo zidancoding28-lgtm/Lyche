@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Pribadi (V1 - Termux)
+# bot.py — Bot Telegram Pribadi (Termux)
 import os
 import re
 import sqlite3
@@ -11,8 +11,8 @@ from telebot import types
 from pathlib import Path
 
 # --- PENGATURAN BOT ---
-BOT_TOKEN = "ISI_TOKEN_BOTFATHER_LO"
-OWNER_ID = 123456789  # Ganti pakai ID lo (dari @userinfobot)
+BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
+OWNER_ID = 8901247073
 
 DOWNLOAD_DIR = Path("./downloads")
 MAX_FILESIZE_MB = 50
@@ -29,7 +29,6 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, joined_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS quotes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT)''')
-    # Isi quote default kalau kosong
     c.execute('SELECT COUNT(*) FROM quotes')
     if c.fetchone()[0] == 0:
         default_quotes = [
@@ -79,40 +78,55 @@ def back_menu():
 def send_welcome(message):
     add_user(message.from_user.id, message.from_user.username)
     
-    # Cek apakah yang chat adalah owner (opsional)
-    # if message.from_user.id != OWNER_ID: return bot.reply_to(message, "Akses ditolak.")
+    if message.from_user.id != OWNER_ID:
+        return bot.reply_to(message, "Maaf, bot ini dikunci khusus Owner.")
     
     text = f"*Halo {message.from_user.first_name}!*\nID lo: `{message.from_user.id}`\n\nSilakan pilih menu di bawah:"
     bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=main_menu())
 
 @bot.message_handler(commands=['help'])
 def send_help(message):
+    if message.from_user.id != OWNER_ID: return
     text = (
         "*Perintah Tersedia:*\n"
         "/start /menu — Tampilkan menu\n"
         "/quote — Kata-kata random\n"
-        "/sysinfo — Info server bot\n"
         "/ping — Cek latency\n\n"
         "*Download:*\n"
         "Kirim link video/audio langsung ke chat, atau ketik `/dl <url>`."
     )
     bot.reply_to(message, text, parse_mode='Markdown')
 
+@bot.message_handler(commands=['ping'])
+def cmd_ping(message):
+    if message.from_user.id != OWNER_ID: return
+    t0 = time.time()
+    m = bot.reply_to(message, "ping...")
+    ms = int((time.time() - t0) * 1000)
+    bot.edit_message_text(f"pong — {ms} ms", message.chat.id, m.message_id)
+
+@bot.message_handler(commands=['quote'])
+def cmd_quote(message):
+    if message.from_user.id != OWNER_ID: return
+    bot.reply_to(message, f"_{get_random_quote()}_", parse_mode='Markdown')
+
 # --- HANDLER CALLBACK (TOMBOL MENU) ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
+    if call.from_user.id != OWNER_ID:
+        return bot.answer_callback_query(call.id, "Akses ditolak.")
+
     if call.data == "menu_main":
         bot.edit_message_text("Silakan pilih menu:", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
     
     elif call.data == "menu_dl":
-        text = "*Menu Download*\nKirim link langsung ke chat, atau ketik:\n`/dl <url>`"
+        text = "*Menu Download*\nKirim link langsung ke chat, atau ketik:\n`/dl <url>` (Video)\n`/dla <url>` (Audio MP3)"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=back_menu())
     
     elif call.data == "menu_anim":
-        # Animasi loading
         msg = bot.edit_message_text("⠋ Memproses...", call.message.chat.id, call.message.message_id)
         spinners = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-        for i in range(5):
+        for _ in range(3):
             for spin in spinners:
                 bot.edit_message_text(f"{spin} Memproses...", call.message.chat.id, msg.message_id)
                 time.sleep(0.2)
@@ -123,7 +137,7 @@ def callback_query(call):
         bot.edit_message_text(f"_{q}_", call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=back_menu())
     
     elif call.data == "menu_sys":
-        text = "*Sistem Bot*\nStatus: Online\nServer: Termux (Android)"
+        text = f"*Sistem Bot*\nStatus: Online\nServer: Termux (Android)\nOwner ID: `{OWNER_ID}`"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=back_menu())
 
 # --- DOWNLOADER (YT-DLP) ---
@@ -139,6 +153,8 @@ def progress_hook(d, chat_id, msg_id):
         bot.edit_message_text("⚙️ Memproses file...", chat_id, msg_id)
 
 def process_download(message, url, mode="video"):
+    if message.from_user.id != OWNER_ID: return
+    
     chat_id = message.chat.id
     msg = bot.reply_to(message, "🔍 Menganalisa link...")
     
@@ -167,14 +183,12 @@ def process_download(message, url, mode="video"):
             info = ydl.extract_info(url, download=True)
             filepath = ydl.prepare_filename(info)
             
-            # YT-DLP kadang mengubah ekstensi (misal .webm jadi .mp3 atau .mp4)
             if mode == "audio":
                 filepath = str(Path(filepath).with_suffix('.mp3'))
             else:
                 filepath = str(Path(filepath).with_suffix('.mp4'))
                 
             if not os.path.exists(filepath):
-                # Cari file terbaru di folder kalau nama beda
                 files = sorted(DOWNLOAD_DIR.glob("*"), key=os.path.getmtime, reverse=True)
                 if files: filepath = str(files[0])
 
@@ -202,6 +216,7 @@ def process_download(message, url, mode="video"):
 
 @bot.message_handler(commands=['dl'])
 def cmd_dl(message):
+    if message.from_user.id != OWNER_ID: return
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         return bot.reply_to(message, "Pakai: `/dl <url>`", parse_mode='Markdown')
@@ -209,6 +224,7 @@ def cmd_dl(message):
 
 @bot.message_handler(commands=['dla'])
 def cmd_dla(message):
+    if message.from_user.id != OWNER_ID: return
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         return bot.reply_to(message, "Pakai: `/dla <url>`", parse_mode='Markdown')
@@ -217,11 +233,12 @@ def cmd_dla(message):
 # --- HANDLER PESAN LINK OTOMATIS ---
 @bot.message_handler(func=lambda message: URL_RE.search(message.text) is not None)
 def handle_link(message):
+    if message.from_user.id != OWNER_ID: return
     url = URL_RE.search(message.text).group(0)
     process_download(message, url, mode="video")
 
 # --- MAIN ---
 if __name__ == "__main__":
     init_db()
-    print("Bot berjalan...")
+    print("Bot berjalan... (Tekan Ctrl+C untuk stop)")
     bot.infinity_polling()
