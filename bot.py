@@ -1,4 +1,4 @@
-# bot.py — Bot Telegram Ultimate (V30d - Hardware Fix)
+# bot.py — Bot Telegram Ultimate (V32 - Quote, ASCII, Timeout Fix)
 import os
 import re
 import shutil
@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from pathlib import Path
 from telebot import types
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 BOT_TOKEN = "8664978056:AAGNBZAhn9QAKhdyHBNILhzMB-5YU9YfWMI"
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "./downloads"))
@@ -38,63 +39,6 @@ cursor.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat
 cursor.execute("CREATE TABLE IF NOT EXISTS users (chat_id INTEGER PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS watches (id INTEGER PRIMARY KEY, chat_id INTEGER, url TEXT, last_hash TEXT)")
 conn.commit()
-
-# --- NATIVE SYSTEM INFO FUNCTIONS ---
-def get_battery_info():
-    try:
-        # Trik: Baca dari virtual filesystem Android yang biasanya gak di-lock
-        paths = [
-            '/sys/class/power_supply/battery/capacity',
-            '/sys/class/power_supply/bms/capacity',
-            '/sys/class/power_supply/BAT0/capacity'
-        ]
-        capacity = None
-        for p in paths:
-            if os.path.exists(p):
-                with open(p, 'r') as f:
-                    capacity = f.read().strip()
-                break
-                
-        if not capacity:
-            return "❌ Gagal baca baterai (file virtual sistem gak nemu)."
-
-        status_paths = [
-            '/sys/class/power_supply/battery/status',
-            '/sys/class/power_supply/bms/status',
-            '/sys/class/power_supply/BAT0/status'
-        ]
-        status = "Unknown"
-        for p in status_paths:
-            if os.path.exists(p):
-                with open(p, 'r') as f:
-                    status = f.read().strip()
-                break
-
-        temp_paths = [
-            '/sys/class/power_supply/battery/temp',
-            '/sys/class/power_supply/bms/temp'
-        ]
-        temp = "N/A"
-        for p in temp_paths:
-            if os.path.exists(p):
-                with open(p, 'r') as f:
-                    temp = f"{int(f.read().strip())/10.0}°C"
-                break
-
-        return f"🔋 **Baterai:** {capacity}%\nStatus: {status}\nSuhu: {temp}"
-    except Exception as e:
-        return f"❌ Gagal baca baterai: {e}"
-
-def get_local_ip():
-    try:
-        # Trik Python murni: Bikin koneksi dummy buat nanya IP lokal ke OS
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return f"🌐 **IP Lokal:** `{ip}`"
-    except:
-        return "❌ Gagal baca IP. Pastiin jaringan nyala."
 
 # --- QUEUE SYSTEM ---
 download_queue = []
@@ -303,7 +247,6 @@ def callback_menu(call):
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton("🎲 Roll Dadu", callback_data="tool_roll"), types.InlineKeyboardButton("🎯 Pick", callback_data="tool_pick"))
         markup.row(types.InlineKeyboardButton("🔑 Genpass", callback_data="tool_genpass"), types.InlineKeyboardButton("🕒 Time", callback_data="tool_time"))
-        markup.row(types.InlineKeyboardButton("🔋 Baterai", callback_data="tool_batt"), types.InlineKeyboardButton("🌐 IP Lokal", callback_data="tool_ip"))
         markup.row(types.InlineKeyboardButton("🗑 Bersihkan Cache", callback_data="tool_clear"))
         markup.row(types.InlineKeyboardButton("⬅️ Balik", callback_data="menu_back"))
         bot.edit_message_text("⚙️ **Menu Alat:**", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
@@ -319,8 +262,6 @@ def callback_tool(call):
     elif tool == "roll": bot.send_message(call.message.chat.id, "🎲 Ketik: `/roll 2d6`", parse_mode="Markdown")
     elif tool == "pick": bot.send_message(call.message.chat.id, "🎯 Ketik: `/pick opsi1 opsi2`", parse_mode="Markdown")
     elif tool == "genpass": bot.send_message(call.message.chat.id, "🔑 Ketik: `/genpass 16`", parse_mode="Markdown")
-    elif tool == "batt": bot.send_message(call.message.chat.id, get_battery_info(), parse_mode="Markdown")
-    elif tool == "ip": bot.send_message(call.message.chat.id, get_local_ip(), parse_mode="Markdown")
     elif tool == "clear":
         deleted_files = 0
         for f in DOWNLOAD_DIR.glob('*'):
@@ -432,15 +373,99 @@ def handle_ocr(message):
         temp_img.unlink(missing_ok=True)
         temp_upscaled.unlink(missing_ok=True)
 
+# --- FITUR BARU: ASCII ART ---
+@bot.message_handler(commands=['ascii'])
+def cmd_ascii(message):
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        return bot.reply_to(message, "Balas sebuah foto pakai command `/ascii`", parse_mode="Markdown")
+    
+    status = bot.reply_to(message, "Mengubah gambar ke ASCII...")
+    try:
+        file_info = bot.get_file(message.reply_to_message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        temp_img = DOWNLOAD_DIR / f"ascii_{message.reply_to_message.photo[-1].file_id}.jpg"
+        
+        with open(temp_img, 'wb') as f: f.write(downloaded_file)
+        
+        img = Image.open(temp_img).convert('L') # Grayscale
+        width, height = img.size
+        new_width = 50
+        new_height = int((new_width * height) / width * 0.5)
+        img = img.resize((new_width, new_height))
+        
+        chars = ["@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."]
+        pixels = img.getdata()
+        ascii_str = "".join([chars[pixel // 25] for pixel in pixels])
+        ascii_img = "\n".join([ascii_str[i:(i+new_width)] for i in range(0, len(ascii_str), new_width)])
+        
+        with open(temp_img, "w") as f: f.write(ascii_img)
+        with open(temp_img, "rb") as f:
+            bot.send_document(message.chat.id, f, caption="Hasil ASCII Art")
+        bot.delete_message(message.chat.id, status.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"Gagal bikin ASCII: {e}", message.chat.id, status.message_id)
+    finally:
+        temp_img.unlink(missing_ok=True)
+
+# --- FITUR BARU: FAKE QUOTE IMAGE ---
+@bot.message_handler(commands=['dl'])
+def cmd_dl(message):
+    text = message.text.replace('/dl ', '')
+    if not text: return bot.reply_to(message, "Format: `/dl <teks>`", parse_mode="Markdown")
+    
+    status = bot.reply_to(message, "Membuat gambar quote...")
+    try:
+        # Canvas 800x800 (background gelap)
+        img = Image.new('RGB', (800, 800), color=(25, 25, 25))
+        draw = ImageDraw.Draw(img)
+        
+        # Coba pakai font bawaan, atau fallback
+        try:
+            font = ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", 40)
+        except:
+            font = ImageFont.load_default()
+            
+        # Bungkus teks
+        margin = 50
+        words = text.split()
+        lines = []
+        current_line = ""
+        for word in words:
+            test_line = current_line + word + " "
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            if bbox[2] - bbox[0] < (800 - margin*2):
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word + " "
+        lines.append(current_line)
+        
+        # Render teks ke tengah
+        total_height = len(lines) * 50
+        y = (800 - total_height) / 2
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line.strip(), font=font)
+            w = bbox[2] - bbox[0]
+            x = (800 - w) / 2
+            draw.text((x, y), line.strip(), font=font, fill=(255, 255, 255))
+            y += 50
+            
+        # Tanda kutip besar
+        draw.text((50, 50), '"', font=font, fill=(100, 100, 100))
+        draw.text((720, 700), '"', font=font, fill=(100, 100, 100))
+            
+        temp_img = DOWNLOAD_DIR / f"quote_{message.chat.id}.jpg"
+        img.save(temp_img)
+        
+        with open(temp_img, "rb") as f:
+            bot.send_photo(message.chat.id, f, caption="Quote generated.")
+        bot.delete_message(message.chat.id, status.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"Gagal bikin quote: {e}", message.chat.id, status.message_id)
+    finally:
+        temp_img.unlink(missing_ok=True)
+
 # --- UTILITY COMMANDS ---
-@bot.message_handler(commands=['baterai'])
-def cmd_batt(message):
-    bot.reply_to(message, get_battery_info(), parse_mode="Markdown")
-
-@bot.message_handler(commands=['ip'])
-def cmd_ip(message):
-    bot.reply_to(message, get_local_ip(), parse_mode="Markdown")
-
 @bot.message_handler(commands=['remind'])
 def cmd_remind(message):
     try:
@@ -557,11 +582,12 @@ def cmd_todo(message):
     bot.reply_to(message, "✅ To-do ditambahkan.")
 
 if __name__ == "__main__":
-    print("Bot running (V30d - Hardware Fix)...")
+    print("Bot running (V32 - Quote & ASCII)...")
     while True:
         try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=15, none_stop=True)
+            # Longgarkan timeout jadi 60 detik biar koneksi lebih stabil
+            bot.infinity_polling(timeout=60, long_polling_timeout=60, none_stop=True)
         except Exception as e:
             print(f"Koneksi terputus: {e}")
-            print("Nyoba nyambung lagi dalam 5 detik...")
-            time.sleep(5)
+            print("Nyoba nyambung lagi dalam 10 detik...")
+            time.sleep(10)
